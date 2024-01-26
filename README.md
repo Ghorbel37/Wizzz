@@ -11,21 +11,21 @@
 > and copies the backup to multiple locations
 
 ## Instructions
-This script requires having WizTree installed
-Place it in the WizTree folder before executing and make sure to execute it with administrator privileges
+>This script requires having WizTree installed. 
+>Place it in the WizTree folder before executing and make sure to execute it with administrator privileges
 
 ## Install
-This will create a scheduled task that will be run each week
-Make sure to run from an elevated powershell promt from WizTree folder
+This will create a scheduled task that will be run each week. 
+Make sure to run from an elevated powershell promt from WizTree folder.
 
 ```sh
 Wizzz_create_task.ps1
 ```
 
 ## Usage
-This will run the script and make a backup
-Run with -silent flag to accept all prompts automatically
-Make sure to run from an elevated powershell promt from WizTree folder
+This will run the script and make a backup. 
+Run with -silent flag to accept all prompts automatically. 
+Make sure to run from an elevated powershell promt from WizTree folder.
 
 ```sh
 Wizzz_backup.ps1 -silent
