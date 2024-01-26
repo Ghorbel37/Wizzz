@@ -5,11 +5,14 @@
   </a>
 </p>
 
-> Backup filesystem tree like a wizzz
-> This script makes a copy of filesystem tree using WizTree and exports it to CSV
-> It generates a CSV file for each drive and compresses the files in a single archive
-> It can copy the backup to multiple locations
-> This script requires having WizTree installed and it must be placed next to WizTree executable
+## Backup filesystem tree like a wizzz
+> This script makes a copy of filesystem tree using WizTree and exports each drive tree to CSV,
+> then compresses the files in a single archive
+> and copies the backup to multiple locations
+
+## Instructions
+This script requires having WizTree installed
+Place it in the WizTree folder before executing and make sure to execute it with administrator privileges
 
 ## Install
 This will create a scheduled task that will be run each week
@@ -29,8 +32,6 @@ Wizzz_backup.ps1 -silent
 ```
 
 ## Author
-
-👤 **Ghorbel37**
 
 * Github: [@Ghorbel37](https://github.com/Ghorbel37)
 
