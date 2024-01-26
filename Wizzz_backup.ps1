@@ -10,9 +10,9 @@ $BackupRoot = "C:\Backup"
 #Separate with pipe "|"
 $Excluded = """$env:WINDIR""|""$env:LOCALAPPDATA\Yarn\"""
 
-# Locations that should have backup folder after finishing
+# Locations that should have backup folder
 # Separate with comma ","
-# 
+
 # $destinationDrives = "D:", "E:", "F:" 
 
 ##########################
@@ -29,10 +29,11 @@ foreach ($arg in $args) {
 
 # Function to display script information
 function DisplayScriptInformation() {
+	cls
     Write-Host "`n`nWelcome to the Backup Script" -ForegroundColor Cyan
     Write-Host "This script exports filesystem structure to csv using WizTree," -ForegroundColor Cyan
     Write-Host "compresses the exported files, and copies the backup to multiple locations." -ForegroundColor Cyan
-    if ($silentMode = $true) {
+    if ($silentMode) {
         Write-Host "Script is running in silent mode" -ForegroundColor Yellow
     }
     Write-Host "`n`n"
