@@ -8,11 +8,12 @@ $BackupRoot = "C:\Backup"
 
 # Set the excluded folders ( Folders that have too many files )
 #Separate with pipe "|"
-$Excluded= """$env:WINDIR""|""$env:LOCALAPPDATA\Yarn\"""
+$Excluded = """$env:WINDIR""|""$env:LOCALAPPDATA\Yarn\"""
 
-# Locations that should have backup folder
+# Locations that should have backup folder after finishing
 # Separate with comma ","
-$destinationDrives = "D:", "E:", "F:" 
+# 
+# $destinationDrives = "D:", "E:", "F:" 
 
 ##########################
 ###Global variables end###
@@ -31,9 +32,9 @@ function DisplayScriptInformation() {
     Write-Host "`n`nWelcome to the Backup Script" -ForegroundColor Cyan
     Write-Host "This script exports filesystem structure to csv using WizTree," -ForegroundColor Cyan
     Write-Host "compresses the exported files, and copies the backup to multiple locations." -ForegroundColor Cyan
-    if($silentMode = $true){
+    if ($silentMode = $true) {
         Write-Host "Script is running in silent mode" -ForegroundColor Yellow
-     }
+    }
     Write-Host "`n`n"
 }
 
@@ -88,7 +89,7 @@ if (-not $silentMode) {
 
 # Create a new folder for each backup
 Write-Output "`nCreating temporary backup folder"
-$null=New-Item -ItemType Directory -Path $BackupLocation -Force
+$null = New-Item -ItemType Directory -Path $BackupLocation -Force
 Write-Output "Done.`n"
 
 
@@ -100,18 +101,18 @@ $drives = Get-WmiObject Win32_LogicalDisk | Select-Object DeviceID
 foreach ($drive in $drives) {
     # Get DriveName And CsvName
     $DriveName = $drive.DeviceID
-    $CsvName=( $drive.DeviceID[0] + "_%d_%t.csv")
-        # System drive
-        if($drive.DeviceID -eq $env:SystemDrive){
-            Write-Output "Saving backup for $DriveName"
-            Start-Process -FilePath "$RunLocation\WizTree.exe" -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait
+    $CsvName = ( $drive.DeviceID[0] + "_%d_%t.csv")
+    # System drive
+    if ($drive.DeviceID -eq $env:SystemDrive) {
+        Write-Output "Saving backup for $DriveName"
+        Start-Process -FilePath "$RunLocation\WizTree.exe" -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait
             
-        }
-        # Other drives
-        else {
-            Write-Output "Saving backup for $DriveName"
-            Start-Process -FilePath "$RunLocation\WizTree.exe" -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait
-        }
+    }
+    # Other drives
+    else {
+        Write-Output "Saving backup for $DriveName"
+        Start-Process -FilePath "$RunLocation\WizTree.exe" -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait
+    }
 }
 Write-Output "Backup complete`n"
 
@@ -122,21 +123,22 @@ $ArchivePath = Join-Path $BackupRoot $ArchiveName
 Compress-Archive -Path "$BackupLocation\*.csv" -DestinationPath $ArchivePath -CompressionLevel "Optimal" -Force
 Write-Output "Done.`n"
 
-# Copy the backup file to different drives
-foreach ($destinationDrive in $destinationDrives) {
-    $destinationPath = Join-Path $destinationDrive "Backup"
-    $destinationFilePath = Join-Path $destinationPath $ArchiveName
+if ($destinationDrives) {
+    # Copy the backup file to different drives
+    foreach ($destinationDrive in $destinationDrives) {
+        $destinationPath = Join-Path $destinationDrive "Backup"
+        $destinationFilePath = Join-Path $destinationPath $ArchiveName
 
-    # Create Backup folder if it doesn't exist
-    if (-not (Test-Path $destinationPath -PathType Container)) {
-        New-Item -ItemType Directory -Path $destinationPath -Force
+        # Create Backup folder if it doesn't exist
+        if (-not (Test-Path $destinationPath -PathType Container)) {
+            New-Item -ItemType Directory -Path $destinationPath -Force
+        }
+
+        Write-Output "Copying backup to $destinationDrive"
+        Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force
     }
-
-    Write-Output "Copying backup to $destinationDrive"
-    Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force
+    Write-Output "Copied backup to all specified drives`n"
 }
-Write-Output "Copied backup to all specified drives`n"
-
 # Cleanup temp CSV files
 Write-Output "Cleaning temp CSV folder"
 
@@ -146,13 +148,15 @@ if (-not $silentMode) {
     if (-not $confirmationDelete) {
         $confirmationDelete = 'Y'
     }
-} else {
+}
+else {
     $confirmationDelete = 'Y'
 }
 if ($confirmationDelete -eq 'Y') {
     Remove-Item -Path $BackupLocation -Recurse -Force
     Write-Output "Cleaning temp CSV folder completed.`n"
-} else {
+}
+else {
     Write-Output "Cleanup cancelled.`n"
 }
 
@@ -161,8 +165,9 @@ if ($confirmationDelete -eq 'Y') {
 # Prompt to press any key to exit
 Write-Host "Backup completed successfully."
 Write-Host "Saved file to: *:\Backup\$ArchiveName `n"
-if(-not $silentMode){Write-Output "Press any key to exit..."
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+if (-not $silentMode) {
+    Write-Output "Press any key to exit..."
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 }
 
 # End of script
