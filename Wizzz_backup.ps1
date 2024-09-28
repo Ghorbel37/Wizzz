@@ -1,4 +1,4 @@
-##########################
+﻿##########################
 #####Global variables#####
 ##########################
 
@@ -29,7 +29,7 @@ foreach ($arg in $args) {
 
 # Function to display script information
 function DisplayScriptInformation() {
-	cls
+    Clear-Host
     Write-Host "`n`nWelcome to the Backup Script" -ForegroundColor Cyan
     Write-Host "This script exports filesystem structure to csv using WizTree," -ForegroundColor Cyan
     Write-Host "compresses the exported files, and copies the backup to multiple locations." -ForegroundColor Cyan
@@ -127,7 +127,8 @@ if ($use7Zip) {
     $ArchiveName = "Backup_$BackupFolderName.7z"
     $ArchivePath = Join-Path $BackupRoot $ArchiveName
     & $sevenZipPath a -t7z $ArchivePath "$BackupLocation\*.csv" -mx=9
-} else {
+}
+else {
     Write-Output "7-Zip not found. Compressing using built-in Zip"
     $ArchiveName = "Backup_$BackupFolderName.zip"
     $ArchivePath = Join-Path $BackupRoot $ArchiveName
