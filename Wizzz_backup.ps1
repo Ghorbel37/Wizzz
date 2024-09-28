@@ -1,4 +1,4 @@
-﻿##########################
+##########################
 #####Global variables#####
 ##########################
 
@@ -117,12 +117,23 @@ foreach ($drive in $drives) {
 }
 Write-Output "Backup complete`n"
 
+# Check if 7-Zip is installed
+$sevenZipPath = "C:\Program Files\7-Zip\7z.exe"
+$use7Zip = Test-Path $sevenZipPath
+
 # Compressing all files
-Write-Output "Compressing all exported CSV files into a single archive"
-$ArchiveName = "Backup_$BackupFolderName.zip"
-$ArchivePath = Join-Path $BackupRoot $ArchiveName
-Compress-Archive -Path "$BackupLocation\*.csv" -DestinationPath $ArchivePath -CompressionLevel "Optimal" -Force
-Write-Output "Done.`n"
+if ($use7Zip) {
+    Write-Output "7-Zip found. Compressing using 7-Zip"
+    $ArchiveName = "Backup_$BackupFolderName.7z"
+    $ArchivePath = Join-Path $BackupRoot $ArchiveName
+    & $sevenZipPath a -t7z $ArchivePath "$BackupLocation\*.csv" -mx=9
+} else {
+    Write-Output "7-Zip not found. Compressing using built-in Zip"
+    $ArchiveName = "Backup_$BackupFolderName.zip"
+    $ArchivePath = Join-Path $BackupRoot $ArchiveName
+    Compress-Archive -Path "$BackupLocation\*.csv" -DestinationPath $ArchivePath -CompressionLevel "Optimal" -Force
+}
+Write-Output "Compression done.`n"
 
 if ($destinationDrives) {
     # Copy the backup file to different drives
