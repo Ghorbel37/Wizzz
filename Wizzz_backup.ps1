@@ -1,4 +1,4 @@
-﻿##########################
+##########################
 #####Global variables#####
 ##########################
 
@@ -137,17 +137,22 @@ else {
 Write-Output "Compression done.`n"
 
 # Copy the backup to all drives
+# Fetch drive in $BackupRoot
+$backupDrive = [System.IO.Path]::GetPathRoot($BackupRoot)
+
 foreach ($drive in $drives) {
-    $destinationPath = Join-Path $drive.DeviceID "Backup"
-    $destinationFilePath = Join-Path $destinationPath $ArchiveName
+    if ($drive.DeviceID -ne $backupDrive) {
+        $destinationPath = Join-Path $drive.DeviceID "Backup"
+        $destinationFilePath = Join-Path $destinationPath $ArchiveName
 
-    # Create Backup folder if it doesn't exist
-    if (-not (Test-Path $destinationPath -PathType Container)) {
-        New-Item -ItemType Directory -Path $destinationPath -Force
+        # Create Backup folder if it doesn't exist
+        if (-not (Test-Path $destinationPath -PathType Container)) {
+            New-Item -ItemType Directory -Path $destinationPath -Force
+        }
+
+        Write-Output "Copying backup to $($drive.DeviceID)"
+        Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force
     }
-
-    Write-Output "Copying backup to $($drive.DeviceID)"
-    Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force
 }
 Write-Output "Copied backup to all drives.`n"
 
