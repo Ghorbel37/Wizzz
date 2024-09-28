@@ -24,6 +24,7 @@ $Excluded = """$env:WINDIR""|""$env:LOCALAPPDATA\Yarn\"""
 foreach ($arg in $args) {
     switch ($arg) {
         "-silent" { $silentMode = $true }
+        "-nocopy" { $noCopy = $true }
     }
 }
 
@@ -136,25 +137,30 @@ else {
 }
 Write-Output "Compression done.`n"
 
-# Copy the backup to all drives
-# Fetch drive in $BackupRoot
-$backupDrive = [System.IO.Path]::GetPathRoot($BackupRoot)
+# Copy the backup to all drives unless -nocopy argument is passed
+if (-not $noCopy) {
+    # Fetch drive in $BackupRoot
+    $backupDrive = [System.IO.Path]::GetPathRoot($BackupRoot)
 
-foreach ($drive in $drives) {
-    if ($drive.DeviceID+ "\" -ne $backupDrive) {
-        $destinationPath = Join-Path $drive.DeviceID "Backup"
-        $destinationFilePath = Join-Path $destinationPath $ArchiveName
+    foreach ($drive in $drives) {
+        if ($drive.DeviceID + "\" -ne $backupDrive) {
+            $destinationPath = Join-Path $drive.DeviceID "Backup"
+            $destinationFilePath = Join-Path $destinationPath $ArchiveName
 
-        # Create Backup folder if it doesn't exist
-        if (-not (Test-Path $destinationPath -PathType Container)) {
-            New-Item -ItemType Directory -Path $destinationPath -Force
+            # Create Backup folder if it doesn't exist
+            if (-not (Test-Path $destinationPath -PathType Container)) {
+                New-Item -ItemType Directory -Path $destinationPath -Force
+            }
+
+            Write-Output "Copying backup to $($drive.DeviceID)"
+            Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force
         }
-
-        Write-Output "Copying backup to $($drive.DeviceID)"
-        Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force
     }
+    Write-Output "Copied backup to all drives.`n"
 }
-Write-Output "Copied backup to all drives.`n"
+else {
+    Write-Output "Skipping backup copy to other drives as '-nocopy' argument was used."
+}
 
 # Cleanup temp CSV files
 Write-Output "Cleaning temp CSV folder"
