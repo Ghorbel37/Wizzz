@@ -103,18 +103,10 @@ $drives = Get-WmiObject Win32_LogicalDisk | Select-Object DeviceID
 foreach ($drive in $drives) {
     # Get DriveName And CsvName
     $DriveName = $drive.DeviceID
-    $CsvName = ( $drive.DeviceID[0] + "_%d_%t.csv")
-    # System drive
-    if ($drive.DeviceID -eq $env:SystemDrive) {
-        Write-Output "Saving backup for $DriveName"
-        Start-Process -FilePath "$RunLocation\WizTree.exe" -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait
-            
-    }
-    # Other drives
-    else {
-        Write-Output "Saving backup for $DriveName"
-        Start-Process -FilePath "$RunLocation\WizTree.exe" -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait
-    }
+    $CsvName = ($drive.DeviceID[0] + "_%d_%t.csv")
+    # Save backup
+    Write-Output "Saving backup for $DriveName"
+    Start-Process -FilePath "$RunLocation\WizTree.exe" -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait
 }
 Write-Output "Backup complete`n"
 
