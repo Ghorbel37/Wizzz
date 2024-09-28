@@ -135,22 +135,21 @@ if ($use7Zip) {
 }
 Write-Output "Compression done.`n"
 
-if ($destinationDrives) {
-    # Copy the backup file to different drives
-    foreach ($destinationDrive in $destinationDrives) {
-        $destinationPath = Join-Path $destinationDrive "Backup"
-        $destinationFilePath = Join-Path $destinationPath $ArchiveName
+# Copy the backup to all drives
+foreach ($drive in $drives) {
+    $destinationPath = Join-Path $drive.DeviceID "Backup"
+    $destinationFilePath = Join-Path $destinationPath $ArchiveName
 
-        # Create Backup folder if it doesn't exist
-        if (-not (Test-Path $destinationPath -PathType Container)) {
-            New-Item -ItemType Directory -Path $destinationPath -Force
-        }
-
-        Write-Output "Copying backup to $destinationDrive"
-        Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force
+    # Create Backup folder if it doesn't exist
+    if (-not (Test-Path $destinationPath -PathType Container)) {
+        New-Item -ItemType Directory -Path $destinationPath -Force
     }
-    Write-Output "Copied backup to all specified drives`n"
+
+    Write-Output "Copying backup to $($drive.DeviceID)"
+    Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force
 }
+Write-Output "Copied backup to all drives.`n"
+
 # Cleanup temp CSV files
 Write-Output "Cleaning temp CSV folder"
 
