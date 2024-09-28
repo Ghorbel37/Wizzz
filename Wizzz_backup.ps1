@@ -141,7 +141,7 @@ Write-Output "Compression done.`n"
 $backupDrive = [System.IO.Path]::GetPathRoot($BackupRoot)
 
 foreach ($drive in $drives) {
-    if ($drive.DeviceID -ne $backupDrive) {
+    if ($drive.DeviceID+ "\" -ne $backupDrive) {
         $destinationPath = Join-Path $drive.DeviceID "Backup"
         $destinationFilePath = Join-Path $destinationPath $ArchiveName
 
