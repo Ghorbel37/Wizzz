@@ -25,6 +25,7 @@ foreach ($arg in $args) {
     switch ($arg) {
         "-silent" { $silentMode = $true }
         "-nocopy" { $noCopy = $true }
+        "-forcezip" { $forceZip = $true }
     }
 }
 
@@ -115,14 +116,14 @@ $sevenZipPath = "C:\Program Files\7-Zip\7z.exe"
 $use7Zip = Test-Path $sevenZipPath
 
 # Compressing all files
-if ($use7Zip) {
+if ($use7Zip -and -not $forceZip) {
     Write-Output "7-Zip found. Compressing using 7-Zip"
     $ArchiveName = "Backup_$BackupFolderName.7z"
     $ArchivePath = Join-Path $BackupRoot $ArchiveName
     & $sevenZipPath a -t7z $ArchivePath "$BackupLocation\*.csv" -mx=9
 }
 else {
-    Write-Output "7-Zip not found. Compressing using built-in Zip"
+    Write-Output "Compressing using built-in Zip"
     $ArchiveName = "Backup_$BackupFolderName.zip"
     $ArchivePath = Join-Path $BackupRoot $ArchiveName
     Compress-Archive -Path "$BackupLocation\*.csv" -DestinationPath $ArchivePath -CompressionLevel "Optimal" -Force
