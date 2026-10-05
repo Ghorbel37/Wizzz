@@ -1,7 +1,7 @@
 <h1 align="center">Welcome to Wizzz 👋</h1>
 <p>
   <a href="#" target="_blank">
-    <img alt="License: GPL--3.0" src="https://img.shields.io/badge/License-GPL--3.0-yellow.svg" />
+    <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg" />
   </a>
 </p>
 
