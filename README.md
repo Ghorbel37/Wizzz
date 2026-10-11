@@ -90,6 +90,13 @@ Before starting, the script shows which drives will be scanned and where the bac
 
 Each run is logged to `<BackupRoot>\Logs`. The script exits with code 1 when something failed.
 
+## Exclusions
+Folders with many files that are not useful in a backup are left out of the export:
+the Windows folder, the recycle bin, temporary files, package manager caches
+(npm, Yarn, pip, NuGet, Gradle, Maven, Cargo) and project dependencies
+(`node_modules`, `.git`, `__pycache__`, `.venv`).
+The full list is `$DefaultExclusions` at the top of `Wizzz_backup.ps1`.
+
 ## Reading a backup
 Extract the archive and open the CSV file of a drive in WizTree (`File > Open`)
 to browse the filesystem tree as it was at the time of the backup.

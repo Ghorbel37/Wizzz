@@ -70,9 +70,36 @@ function GetForwardedArguments($Parameters, [string[]]$Exclude = @()) {
 # Name of the scheduled task
 $TaskName = "Wiztree Filesystem Backup"
 
-# Set the excluded folders ( Folders that have too many files )
-#Separate with pipe "|"
-$Excluded = """$env:WINDIR""|""$env:LOCALAPPDATA\Yarn\"""
+# Folders excluded from the export: they contain too many files that are not useful in a backup
+# Uses the WizTree filter syntax: * is a wildcard and folders end with a backslash.
+# Environment variables like %LOCALAPPDATA% are expanded.
+$DefaultExclusions = @(
+    '%WINDIR%',
+    '*\$Recycle.Bin\',
+    '*\System Volume Information\',
+    # Temporary files and caches
+    '*\AppData\Local\Temp\',
+    '*\AppData\Local\Microsoft\Windows\INetCache\',
+    # Package managers
+    '%LOCALAPPDATA%\Yarn\',
+    '*\AppData\Local\npm-cache\',
+    '*\AppData\Local\pip\cache\',
+    '*\.nuget\packages\',
+    '*\.gradle\caches\',
+    '*\.m2\repository\',
+    '*\.cargo\registry\',
+    # Dependencies and build files inside projects
+    '*\node_modules\',
+    '*\.git\',
+    '*\__pycache__\',
+    '*\.venv\'
+)
+$Exclusions = $DefaultExclusions
+
+# Build the WizTree exclusion filter, separated with pipe "|"
+function GetExclusionFilter([string[]]$Patterns) {
+    ($Patterns | ForEach-Object { "`"$([Environment]::ExpandEnvironmentVariables($_))`"" }) -join "|"
+}
 
 ##########################
 ###Global variables end###
@@ -299,7 +326,7 @@ foreach ($drive in $scanDrives) {
     $CsvName = ($drive.DeviceID[0] + "_%d_%t.csv")
     # Save backup
     Write-Output "Saving backup for $DriveName"
-    $wizTree = Start-Process -FilePath $WizTreeExePath -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait -PassThru
+    $wizTree = Start-Process -FilePath $WizTreeExePath -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$(GetExclusionFilter $Exclusions)" -Wait -PassThru
 
     # Make sure WizTree exported a CSV for this drive
     $exportedCsv = Get-ChildItem -Path $BackupLocation -Filter ($drive.DeviceID[0] + "_*.csv") -ErrorAction SilentlyContinue
