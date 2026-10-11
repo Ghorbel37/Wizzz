@@ -118,6 +118,9 @@ Write-Output "Done.`n"
 
 
 
+# Drives or locations that failed, reported at the end of the script
+$failures = @()
+
 # Export each drive
 foreach ($drive in $drives) {
     # Get DriveName And CsvName
@@ -125,7 +128,20 @@ foreach ($drive in $drives) {
     $CsvName = ($drive.DeviceID[0] + "_%d_%t.csv")
     # Save backup
     Write-Output "Saving backup for $DriveName"
-    Start-Process -FilePath "$RunLocation\WizTree.exe" -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait
+    $wizTree = Start-Process -FilePath "$RunLocation\WizTree.exe" -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait -PassThru
+
+    # Make sure WizTree exported a CSV for this drive
+    $exportedCsv = Get-ChildItem -Path $BackupLocation -Filter ($drive.DeviceID[0] + "_*.csv") -ErrorAction SilentlyContinue
+    if (-not $exportedCsv) {
+        Write-Warning "WizTree failed to export $DriveName (exit code $($wizTree.ExitCode))"
+        $failures += "Export of $DriveName"
+    }
+}
+
+# Stop if nothing was exported, there is nothing to compress
+if (-not (Get-ChildItem -Path $BackupLocation -Filter "*.csv")) {
+    Write-Error "No drive was exported, aborting."
+    ExitScript 1
 }
 Write-Output "Backup complete`n"
 
@@ -139,12 +155,27 @@ if ($use7Zip -and -not $ForceZip) {
     $ArchiveName = "Backup_$BackupFolderName.7z"
     $ArchivePath = Join-Path $BackupRoot $ArchiveName
     & $sevenZipPath a -t7z $ArchivePath "$BackupLocation\*.csv" -mx=9
+    # 7-Zip exit codes: 0 = success, 1 = warning, 2 and above = error
+    $compressionFailed = $LASTEXITCODE -ge 2
 }
 else {
     Write-Output "Compressing using built-in Zip"
     $ArchiveName = "Backup_$BackupFolderName.zip"
     $ArchivePath = Join-Path $BackupRoot $ArchiveName
-    Compress-Archive -Path "$BackupLocation\*.csv" -DestinationPath $ArchivePath -CompressionLevel "Optimal" -Force
+    try {
+        Compress-Archive -Path "$BackupLocation\*.csv" -DestinationPath $ArchivePath -CompressionLevel "Optimal" -Force -ErrorAction Stop
+        $compressionFailed = $false
+    }
+    catch {
+        Write-Warning $_
+        $compressionFailed = $true
+    }
+}
+
+# Keep the exported CSV files if the compression failed
+if ($compressionFailed -or -not (Test-Path $ArchivePath -PathType Leaf)) {
+    Write-Error "Compression failed. The exported CSV files were kept in $BackupLocation"
+    ExitScript 1
 }
 Write-Output "Compression done.`n"
 
@@ -164,10 +195,16 @@ if (-not $NoCopy) {
             }
 
             Write-Output "Copying backup to $($drive.DeviceID)"
-            Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force
+            try {
+                Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "Failed to copy backup to $($drive.DeviceID): $_"
+                $failures += "Copy to $($drive.DeviceID)"
+            }
         }
     }
-    Write-Output "Copied backup to all drives.`n"
+    Write-Output "Copying done.`n"
 }
 else {
     Write-Output "Skipping backup copy to other drives as '-NoCopy' argument was used."
@@ -196,9 +233,15 @@ else {
 
 
 
-# Prompt to press any key to exit
-Write-Host "Backup completed successfully."
+# Report the result and exit
+if ($failures) {
+    Write-Warning "Backup completed with errors:"
+    $failures | ForEach-Object { Write-Warning " - $_" }
+}
+else {
+    Write-Host "Backup completed successfully."
+}
 Write-Host "Saved file to: *:\Backup\$ArchiveName `n"
-WaitForKeyPress "Press any key to exit..."
+ExitScript ([int][bool]$failures)
 
 # End of script
