@@ -151,8 +151,14 @@ function ReadConfig([string]$Path) {
 # reads as double quotes. Double quotes around each pattern do not work, the backslash before
 # the closing quote of a folder escapes it and the filter is ignored.
 # A single quote inside a pattern is written as two single quotes.
+# Folders get a trailing * so their content is excluded too: when scanning a whole drive,
+# WizTree does not always exclude the subfolders of a folder that only ends with a backslash.
 function GetExclusionFilter([string[]]$Patterns) {
-    $quoted = $Patterns | ForEach-Object { "'" + [Environment]::ExpandEnvironmentVariables($_).Replace("'", "''") + "'" }
+    $quoted = $Patterns | ForEach-Object {
+        $pattern = [Environment]::ExpandEnvironmentVariables($_)
+        if ($pattern.EndsWith("\")) { $pattern += "*" }
+        "'" + $pattern.Replace("'", "''") + "'"
+    }
     "`"$($quoted -join "|")`""
 }
 
