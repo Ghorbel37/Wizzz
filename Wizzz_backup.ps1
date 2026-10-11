@@ -67,6 +67,19 @@ function GetForwardedArguments($Parameters, [string[]]$Exclude = @()) {
     }
 }
 
+# Get the free space in bytes of the drive of a path, or $null if it cannot be read
+function GetFreeSpace([string]$Path) {
+    try {
+        ([System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($Path))).AvailableFreeSpace
+    }
+    catch {
+        $null
+    }
+}
+
+# Free space needed on the backup drive before exporting
+$MinFreeSpace = 1GB
+
 # Name of the scheduled task
 $TaskName = "Wiztree Filesystem Backup"
 
@@ -309,6 +322,13 @@ if (-not $Silent) {
     }
 }
 
+# Make sure there is room for the exported CSV files
+$backupFreeSpace = GetFreeSpace $BackupRoot
+if ($null -ne $backupFreeSpace -and $backupFreeSpace -lt $MinFreeSpace) {
+    Write-Error "Not enough free space in $BackupRoot ($([math]::Round($backupFreeSpace / 1GB, 2)) GB free, $($MinFreeSpace / 1GB) GB needed)"
+    ExitScript 1
+}
+
 # Create a new folder for each backup
 Write-Output "`nCreating temporary backup folder"
 $null = New-Item -ItemType Directory -Path $BackupLocation -Force
@@ -393,6 +413,15 @@ foreach ($destinationPath in $copyTargets) {
     if (-not (Test-Path $destinationRoot)) {
         Write-Output "Skipping $($destinationPath): drive $destinationRoot is not connected"
         $notConnected += $destinationPath
+        continue
+    }
+
+    # Make sure the archive fits on the destination drive
+    $archiveSize = (Get-Item $ArchivePath).Length
+    $destinationFreeSpace = GetFreeSpace $destinationPath
+    if ($null -ne $destinationFreeSpace -and $destinationFreeSpace -lt $archiveSize) {
+        Write-Warning "Not enough free space to copy backup to $destinationPath ($([math]::Round($destinationFreeSpace / 1MB)) MB free, $([math]::Round($archiveSize / 1MB)) MB needed)"
+        $failures += "Copy to $destinationPath (not enough free space)"
         continue
     }
 
