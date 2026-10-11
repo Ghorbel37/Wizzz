@@ -601,7 +601,27 @@ if (-not $WizTreeExePath) {
     }
     FailBackup $message
 }
-Write-Output "Using WizTree: $WizTreeExePath`n"
+Write-Output "Using WizTree: $WizTreeExePath"
+
+# Check if 7-Zip is installed, using its registry entry, the usual install folders or the PATH
+$sevenZipCandidates = @(
+    (Get-ItemProperty -Path "HKLM:\SOFTWARE\7-Zip" -Name Path -ErrorAction SilentlyContinue).Path,
+    $env:ProgramFiles,
+    ${env:ProgramFiles(x86)}
+) | Where-Object { $_ } | ForEach-Object { Join-Path $_ "7z.exe"; Join-Path $_ "7-Zip\7z.exe" }
+$sevenZipCandidates += (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+$sevenZipPath = $sevenZipCandidates | Where-Object { $_ -and (Test-Path $_ -PathType Leaf) } | Select-Object -First 1
+$use7Zip = [bool]$sevenZipPath -and -not $ForceZip
+if ($use7Zip) {
+    Write-Output "Using 7-Zip: $sevenZipPath`n"
+}
+elseif ($ForceZip) {
+    Write-Output "Using the built-in Zip compression (-ForceZip)`n"
+}
+else {
+    Write-Warning "7-Zip is not installed, the built-in Zip compression is used. Install 7-Zip from https://www.7-zip.org/ for archives about half the size."
+    Write-Output ""
+}
 
 
 # Get the drives to back up
@@ -715,19 +735,9 @@ if (-not (Get-ChildItem -Path $BackupLocation -Filter "*.csv")) {
 }
 Write-Output "Backup complete`n"
 
-# Check if 7-Zip is installed, using its registry entry, the usual install folders or the PATH
-$sevenZipCandidates = @(
-    (Get-ItemProperty -Path "HKLM:\SOFTWARE\7-Zip" -Name Path -ErrorAction SilentlyContinue).Path,
-    $env:ProgramFiles,
-    ${env:ProgramFiles(x86)}
-) | Where-Object { $_ } | ForEach-Object { Join-Path $_ "7z.exe"; Join-Path $_ "7-Zip\7z.exe" }
-$sevenZipCandidates += (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
-$sevenZipPath = $sevenZipCandidates | Where-Object { $_ -and (Test-Path $_ -PathType Leaf) } | Select-Object -First 1
-$use7Zip = [bool]$sevenZipPath
-
 # Compressing all files
-if ($use7Zip -and -not $ForceZip) {
-    Write-Output "7-Zip found. Compressing using 7-Zip"
+if ($use7Zip) {
+    Write-Output "Compressing using 7-Zip"
     $ArchiveName = "Backup_$BackupFolderName.7z"
     $ArchivePath = Join-Path $BackupRoot $ArchiveName
     # PPMd compresses the CSV text about 30% smaller than the default LZMA2 and faster.

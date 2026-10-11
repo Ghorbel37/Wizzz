@@ -15,7 +15,7 @@
 * [WizTree](https://diskanalyzer.com/) installed
 * [7-Zip](https://www.7-zip.org/) (optional). It is used when installed, giving archives about half the size
   of the built-in Zip (PPMd compression, which works best on the CSV text).
-  Otherwise the built-in Zip compression is used.
+  Otherwise the built-in Zip compression is used and the script recommends installing 7-Zip.
 * Administrator privileges. The script restarts itself as administrator if needed.
 
 The script finds WizTree in its own folder or in the WizTree installation folder.
