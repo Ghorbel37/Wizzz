@@ -136,7 +136,7 @@ All the settings are optional, missing ones use the default value:
   "SkipScan": ["E:"],
   "SkipCopy": ["D:"],
   "CopyTo": ["G:\\My Drive\\Backup"],
-  "Exclusions": ["%WINDIR%", "*\\node_modules\\"],
+  "Exclusions": ["%WINDIR%\\", "*\\node_modules\\"],
   "TaskDay": "Sunday",
   "TaskTime": "23:12"
 }

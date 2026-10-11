@@ -92,7 +92,7 @@ $TaskName = "Wiztree Filesystem Backup"
 # Uses the WizTree filter syntax: * is a wildcard and folders end with a backslash.
 # Environment variables like %LOCALAPPDATA% are expanded.
 $DefaultExclusions = @(
-    '%WINDIR%',
+    '%WINDIR%\',
     '*\$Recycle.Bin\',
     '*\System Volume Information\',
     # Temporary files and caches
@@ -147,8 +147,13 @@ function ReadConfig([string]$Path) {
 }
 
 # Build the WizTree exclusion filter, separated with pipe "|"
+# The whole filter is double quoted and each pattern is quoted with single quotes, which WizTree
+# reads as double quotes. Double quotes around each pattern do not work, the backslash before
+# the closing quote of a folder escapes it and the filter is ignored.
+# A single quote inside a pattern is written as two single quotes.
 function GetExclusionFilter([string[]]$Patterns) {
-    ($Patterns | ForEach-Object { "`"$([Environment]::ExpandEnvironmentVariables($_))`"" }) -join "|"
+    $quoted = $Patterns | ForEach-Object { "'" + [Environment]::ExpandEnvironmentVariables($_).Replace("'", "''") + "'" }
+    "`"$($quoted -join "|")`""
 }
 
 ##########################
