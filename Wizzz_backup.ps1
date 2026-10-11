@@ -1,3 +1,13 @@
+# Command-line parameters
+#   -Silent    Accept all prompts automatically
+#   -NoCopy    Do not copy the backup to other drives
+#   -ForceZip  Use the built-in Zip compression even if 7-Zip is installed
+param(
+    [switch]$Silent,
+    [switch]$NoCopy,
+    [switch]$ForceZip
+)
+
 ##########################
 #####Global variables#####
 ##########################
@@ -13,21 +23,12 @@ $Excluded = """$env:WINDIR""|""$env:LOCALAPPDATA\Yarn\"""
 # Locations that should have backup folder
 # Separate with comma ","
 
-# $destinationDrives = "D:", "E:", "F:" 
+# $destinationDrives = "D:", "E:", "F:"
 
 ##########################
 ###Global variables end###
 ##########################
 
-
-# Parse command-line arguments
-foreach ($arg in $args) {
-    switch ($arg) {
-        "-silent" { $silentMode = $true }
-        "-nocopy" { $noCopy = $true }
-        "-forcezip" { $forceZip = $true }
-    }
-}
 
 # Function to display script information
 function DisplayScriptInformation() {
@@ -35,7 +36,7 @@ function DisplayScriptInformation() {
     Write-Host "`n`nWelcome to the Backup Script" -ForegroundColor Cyan
     Write-Host "This script exports filesystem structure to csv using WizTree," -ForegroundColor Cyan
     Write-Host "compresses the exported files, and copies the backup to multiple locations." -ForegroundColor Cyan
-    if ($silentMode) {
+    if ($Silent) {
         Write-Host "Script is running in silent mode" -ForegroundColor Yellow
     }
     Write-Host "`n`n"
@@ -52,7 +53,16 @@ if (-not $isAdmin) {
     Write-Output "It will restart itself with administrator privileges."
     Write-Output "Press any key to continue..."
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    # Forward the parameters so the elevated instance behaves the same way
+    $forwardedArgs = foreach ($param in $PSBoundParameters.GetEnumerator()) {
+        if ($param.Value -is [switch]) {
+            if ($param.Value) { "-$($param.Key)" }
+        }
+        else {
+            "-$($param.Key) `"$($param.Value)`""
+        }
+    }
+    Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" $forwardedArgs" -Verb RunAs
     exit
 }
 
@@ -77,7 +87,7 @@ $drives | Format-Table -AutoSize
 
 
 # Ask for confirmation
-if (-not $silentMode) {
+if (-not $Silent) {
     $confirmation = Read-Host "Do you want to proceed with the backup? (Y/n)"
     if (-not $confirmation) {
         $confirmation = 'Y'
@@ -116,7 +126,7 @@ $sevenZipPath = "C:\Program Files\7-Zip\7z.exe"
 $use7Zip = Test-Path $sevenZipPath
 
 # Compressing all files
-if ($use7Zip -and -not $forceZip) {
+if ($use7Zip -and -not $ForceZip) {
     Write-Output "7-Zip found. Compressing using 7-Zip"
     $ArchiveName = "Backup_$BackupFolderName.7z"
     $ArchivePath = Join-Path $BackupRoot $ArchiveName
@@ -130,8 +140,8 @@ else {
 }
 Write-Output "Compression done.`n"
 
-# Copy the backup to all drives unless -nocopy argument is passed
-if (-not $noCopy) {
+# Copy the backup to all drives unless -NoCopy argument is passed
+if (-not $NoCopy) {
     # Fetch drive in $BackupRoot
     $backupDrive = [System.IO.Path]::GetPathRoot($BackupRoot)
 
@@ -152,14 +162,14 @@ if (-not $noCopy) {
     Write-Output "Copied backup to all drives.`n"
 }
 else {
-    Write-Output "Skipping backup copy to other drives as '-nocopy' argument was used."
+    Write-Output "Skipping backup copy to other drives as '-NoCopy' argument was used."
 }
 
 # Cleanup temp CSV files
 Write-Output "Cleaning temp CSV folder"
 
 # Check if silent flag is set
-if (-not $silentMode) {
+if (-not $Silent) {
     $confirmationDelete = Read-Host "Do you want to clean temporary backup files? (Y/n)"
     if (-not $confirmationDelete) {
         $confirmationDelete = 'Y'
@@ -181,7 +191,7 @@ else {
 # Prompt to press any key to exit
 Write-Host "Backup completed successfully."
 Write-Host "Saved file to: *:\Backup\$ArchiveName `n"
-if (-not $silentMode) {
+if (-not $Silent) {
     Write-Output "Press any key to exit..."
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 }
