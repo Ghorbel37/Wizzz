@@ -54,6 +54,7 @@ function WaitForKeyPress([string]$Message = "Press any key to continue...") {
 
 # Exit the script with the given exit code
 function ExitScript([int]$ExitCode = 0) {
+    try { $null = Stop-Transcript } catch { Write-Verbose "No transcript to stop" }
     WaitForKeyPress "Press any key to exit..."
     exit $ExitCode
 }
@@ -81,6 +82,17 @@ if (-not $isAdmin) {
     exit
 }
 
+# Get the current date and time for creating a unique folder
+$BackupFolderName = Get-Date -Format "yyyyMMdd_HHmmss"
+$BackupLocation = Join-Path $BackupRoot $BackupFolderName
+
+# Log everything to a file so unattended runs can be checked later
+$LogFolder = Join-Path $BackupRoot "Logs"
+$LogPath = Join-Path $LogFolder "Wizzz_$BackupFolderName.log"
+$null = New-Item -ItemType Directory -Path $LogFolder -Force
+$null = Start-Transcript -Path $LogPath
+Write-Output "Logging to $LogPath`n"
+
 # Find the WizTree executable
 if ($WizTreePath) {
     $wizTreeCandidates = @($WizTreePath)
@@ -99,10 +111,6 @@ if (-not $WizTreeExePath) {
     ExitScript 1
 }
 Write-Output "Using WizTree: $WizTreeExePath`n"
-
-# Get the current date and time for creating a unique folder
-$BackupFolderName = Get-Date -Format "yyyyMMdd_HHmmss"
-$BackupLocation = Join-Path $BackupRoot $BackupFolderName
 
 
 # Get local fixed drives only (DriveType 3), skipping optical, removable and network drives
@@ -174,7 +182,8 @@ if ($use7Zip -and -not $ForceZip) {
     Write-Output "7-Zip found. Compressing using 7-Zip"
     $ArchiveName = "Backup_$BackupFolderName.7z"
     $ArchivePath = Join-Path $BackupRoot $ArchiveName
-    & $sevenZipPath a -t7z $ArchivePath "$BackupLocation\*.csv" -mx=9
+    # Pipe through Out-Host so the 7-Zip output also goes to the log
+    & $sevenZipPath a -t7z $ArchivePath "$BackupLocation\*.csv" -mx=9 | Out-Host
     # 7-Zip exit codes: 0 = success, 1 = warning, 2 and above = error
     $compressionFailed = $LASTEXITCODE -ge 2
 }
