@@ -12,7 +12,8 @@
 #              They are added to the automatic copies (use -NoCopy to only copy to them)
 # Lists can also be given as a single comma separated value, e.g. -SkipScan "E:,F:"
 #   -ConfigPath  Configuration file (default: Wizzz.config.json next to this script)
-#                Options given on the command line override the configuration file.
+#                It overrides the default configuration Wizzz.config.default.json.
+#                Options given on the command line override both.
 #   -Configure   Edit the configuration file interactively, then exit
 #
 # Scheduled task
@@ -113,7 +114,8 @@ $DefaultExclusions = @(
     '*\.venv\'
 )
 
-# Default settings, overridden by the configuration file, then by the command line
+# Default settings, used when the default configuration file is missing, e.g. when only the script was copied.
+# Overridden by the default configuration file, the configuration file, then the command line.
 $DefaultSettings = [ordered]@{
     BackupRoot  = "C:\Backup"
     WizTreePath = ""
@@ -128,13 +130,22 @@ $DefaultSettings = [ordered]@{
 }
 $WeekDays = "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
 
+# Default configuration shipped with the script, it overrides the default settings above.
+# The configuration file (-ConfigPath) only contains the local changes and overrides it.
+$DefaultConfigPath = Join-Path $PSScriptRoot "Wizzz.config.default.json"
+
 # Read the configuration file, returns the settings it contains
 function ReadConfig([string]$Path) {
     $config = [ordered]@{}
     if (-not (Test-Path $Path -PathType Leaf)) {
         return $config
     }
-    $json = Get-Content -Path $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    try {
+        $json = Get-Content -Path $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "$($Path): $_"
+    }
     foreach ($property in $json.PSObject.Properties) {
         if ($property.Name -in $DefaultSettings.Keys) {
             $config[$property.Name] = $property.Value
@@ -401,7 +412,7 @@ function EditConfiguration {
             "5" { $edited.SkipScan = ReadDrives -Title "Drives not to scan" -Current $edited.SkipScan -AvailableDrives $availableDrives }
             "6" { $edited.SkipCopy = ReadDrives -Title "Drives not to copy the backup to" -Current $edited.SkipCopy -AvailableDrives $availableDrives }
             "7" { $edited.CopyTo = EditList -Title "Extra folders the backup is copied to, e.g. G:\My Drive\Backup" -Items $edited.CopyTo }
-            "8" { $edited.Exclusions = EditList -Title "Excluded folders (* is a wildcard, folders end with \)" -Items $edited.Exclusions -Defaults $DefaultExclusions }
+            "8" { $edited.Exclusions = EditList -Title "Excluded folders (* is a wildcard, folders end with \)" -Items $edited.Exclusions -Defaults $DefaultSettings.Exclusions }
             "9" {
                 $day = Read-Host "Day of the week [$($edited.TaskDay)]"
                 if ($day) {
@@ -483,12 +494,16 @@ if (-not $isAdmin) {
     exit
 }
 
-# Load the settings: defaults, then the configuration file, then the command line
+# Load the settings: defaults, then the default configuration, then the configuration file, then the command line
 try {
+    if ($ConfigPath -ne $DefaultConfigPath) {
+        $config = ReadConfig $DefaultConfigPath
+        foreach ($key in $config.Keys) { $DefaultSettings[$key] = $config[$key] }
+    }
     $config = ReadConfig $ConfigPath
 }
 catch {
-    Write-Error "Could not read the configuration file $($ConfigPath): $_"
+    Write-Error "Could not read the configuration file $_"
     ExitScript 1
 }
 $Settings = [ordered]@{}

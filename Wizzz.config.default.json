@@ -1,0 +1,29 @@
+{
+  "BackupRoot": "C:\\Backup",
+  "WizTreePath": "",
+  "NoCopy": false,
+  "ForceZip": false,
+  "SkipScan": [],
+  "SkipCopy": [],
+  "CopyTo": [],
+  "Exclusions": [
+    "%WINDIR%\\",
+    "*\\$Recycle.Bin\\",
+    "*\\System Volume Information\\",
+    "*\\AppData\\Local\\Temp\\",
+    "*\\AppData\\Local\\Microsoft\\Windows\\INetCache\\",
+    "%LOCALAPPDATA%\\Yarn\\",
+    "*\\AppData\\Local\\npm-cache\\",
+    "*\\AppData\\Local\\pip\\cache\\",
+    "*\\.nuget\\packages\\",
+    "*\\.gradle\\caches\\",
+    "*\\.m2\\repository\\",
+    "*\\.cargo\\registry\\",
+    "*\\node_modules\\",
+    "*\\.git\\",
+    "*\\__pycache__\\",
+    "*\\.venv\\"
+  ],
+  "TaskDay": "Sunday",
+  "TaskTime": "23:12"
+}

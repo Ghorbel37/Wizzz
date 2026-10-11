@@ -124,8 +124,10 @@ The easiest way to set up Wizzz is the interactive configuration:
 When saving, it offers to install the scheduled task, or to update it when the schedule changed.
 
 ### Configuration file
-The settings are saved in `Wizzz.config.json` next to the script. It can also be edited by hand.
-All the settings are optional, missing ones use the default value:
+The default settings are in [`Wizzz.config.default.json`](Wizzz.config.default.json), next to the script.
+Your own settings are saved in `Wizzz.config.json`, which overrides the default configuration.
+It is not tracked by git, so updating Wizzz keeps your settings.
+It can also be edited by hand. All the settings are optional, missing ones use the default configuration:
 
 ```json
 {
@@ -152,7 +154,7 @@ Folders with many files that are not useful in a backup are left out of the expo
 the Windows folder, the recycle bin, temporary files, package manager caches
 (npm, Yarn, pip, NuGet, Gradle, Maven, Cargo) and project dependencies
 (`node_modules`, `.git`, `__pycache__`, `.venv`).
-The full list is `$DefaultExclusions` at the top of `Wizzz_backup.ps1`.
+The full list is `Exclusions` in [`Wizzz.config.default.json`](Wizzz.config.default.json).
 Set `Exclusions` in the configuration file to use your own list instead.
 It uses the WizTree filter syntax: `*` is a wildcard and folders end with a backslash.
 
