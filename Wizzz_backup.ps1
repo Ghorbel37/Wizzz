@@ -80,9 +80,11 @@ $BackupFolderName = Get-Date -Format "yyyyMMdd_HHmmss"
 $BackupLocation = Join-Path $BackupRoot $BackupFolderName
 
 
-# Display all drives in a table with additional information
-Write-Host "Available drives:`n"
-$drives = Get-WmiObject Win32_LogicalDisk | Select-Object DeviceID, VolumeName, Size, FreeSpace, FileSystem
+# Get local fixed drives only (DriveType 3), skipping optical, removable and network drives
+$drives = Get-CimInstance Win32_LogicalDisk -Filter "DriveType = 3" | Select-Object DeviceID, VolumeName, Size, FreeSpace, FileSystem
+
+# Display the drives in a table with additional information
+Write-Host "Drives to back up:`n"
 $drives | Format-Table -AutoSize
 
 
@@ -107,10 +109,7 @@ Write-Output "Done.`n"
 
 
 
-# Get all logical drives
-$drives = Get-WmiObject Win32_LogicalDisk | Select-Object DeviceID
-
-# Display the list
+# Export each drive
 foreach ($drive in $drives) {
     # Get DriveName And CsvName
     $DriveName = $drive.DeviceID
