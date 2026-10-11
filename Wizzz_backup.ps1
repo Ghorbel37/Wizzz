@@ -13,6 +13,7 @@
 # Lists can also be given as a single comma separated value, e.g. -SkipScan "E:,F:"
 #   -ConfigPath  Configuration file (default: Wizzz.config.json next to this script)
 #                Options given on the command line override the configuration file.
+#   -Configure   Edit the configuration file interactively, then exit
 #
 # Scheduled task
 #   -InstallTask    Register a scheduled task that runs the backup with the configuration file
@@ -34,7 +35,8 @@ param(
     [switch]$UninstallTask,
     [string]$TaskDay,
     [string]$TaskTime,
-    [string]$ConfigPath = (Join-Path $PSScriptRoot "Wizzz.config.json")
+    [string]$ConfigPath = (Join-Path $PSScriptRoot "Wizzz.config.json"),
+    [switch]$Configure
 )
 
 ##########################
@@ -202,6 +204,252 @@ function FailBackup([string]$Message) {
     ExitScript 1
 }
 
+# Get local fixed drives only (DriveType 3), skipping optical, removable and network drives
+function GetLocalDrives([switch]$Quiet) {
+    $localDrives = Get-CimInstance Win32_LogicalDisk -Filter "DriveType = 3" | Select-Object DeviceID, VolumeName, Size, FreeSpace, FileSystem
+
+    # Keep only drives on a real disk partition. Virtual drives such as Google Drive,
+    # subst drives or RAM disks are reported as fixed drives but have no partition.
+    $partitionLetters = Get-Partition -ErrorAction SilentlyContinue | Where-Object DriveLetter | ForEach-Object { $_.DriveLetter }
+    if ($partitionLetters) {
+        $virtualDrives = $localDrives | Where-Object { $_.DeviceID[0] -notin $partitionLetters }
+        if (-not $Quiet) {
+            foreach ($drive in $virtualDrives) {
+                Write-Host "Skipping $($drive.DeviceID) $($drive.VolumeName): not on a disk partition (virtual drive)"
+            }
+        }
+        $localDrives = $localDrives | Where-Object { $_.DeviceID[0] -in $partitionLetters }
+    }
+    elseif (-not $Quiet) {
+        Write-Warning "Could not list the disk partitions, virtual drives will not be skipped."
+    }
+    $localDrives
+}
+
+# Register the scheduled task, returns $true on success
+# The task runs this script silently with the configuration file and the given extra arguments.
+# The configuration file is read on each run, so it can be changed later without reinstalling the task.
+function InstallScheduledTask([string]$ExtraArguments) {
+    $taskCommand = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Silent -ConfigPath `"$ConfigPath`" $ExtraArguments".TrimEnd()
+    try {
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $taskCommand
+        $trigger = New-ScheduledTaskTrigger -Weekly -At $TaskTime -DaysOfWeek $TaskDay -ErrorAction Stop
+
+        # Run as the current user whether they are logged on or not, without storing a password (S4U)
+        $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType S4U -RunLevel Highest
+
+        # Run as soon as possible if the computer was off at the scheduled time, and also on battery
+        $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+
+        # Register the task, replacing it if it already exists
+        $null = Register-ScheduledTask -TaskName $TaskName -Description "Takes a copy of filesystem structure using WizTree and saves it in $BackupRoot" `
+            -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Error "Failed to register the scheduled task: $_"
+        return $false
+    }
+    Write-Host "Scheduled task '$TaskName' registered: every $TaskDay at $TaskTime"
+    Write-Host "Command: powershell.exe $taskCommand"
+    return $true
+}
+
+# Ask a yes/no question, Enter means yes
+function ConfirmChoice([string]$Question) {
+    $answer = Read-Host "$Question (Y/n)"
+    return (-not $answer -or $answer -eq "Y")
+}
+
+# Format a list for display
+function FormatList($Items) {
+    if (@($Items).Count) { @($Items) -join ", " } else { "(none)" }
+}
+
+# Edit a list interactively, returns the new list
+function EditList([string]$Title, [string[]]$Items, [string[]]$Defaults) {
+    $list = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in $Items) { $list.Add($item) }
+    while ($true) {
+        Write-Host "`n$Title" -ForegroundColor Cyan
+        if ($list.Count) {
+            for ($i = 0; $i -lt $list.Count; $i++) {
+                Write-Host ("  {0,2}. {1}" -f ($i + 1), $list[$i])
+            }
+        }
+        else {
+            Write-Host "  (none)"
+        }
+        $prompt = "A = add, R = remove"
+        if ($Defaults) { $prompt += ", D = reset to defaults" }
+        $choice = Read-Host "$prompt, Enter = done"
+        switch ($choice) {
+            "A" {
+                $value = (Read-Host "Value to add").Trim()
+                if ($value) { $list.Add($value) }
+            }
+            "R" {
+                $number = Read-Host "Number to remove"
+                if ($number -match "^\d+$" -and [int]$number -ge 1 -and [int]$number -le $list.Count) {
+                    $list.RemoveAt([int]$number - 1)
+                }
+                else {
+                    Write-Host "Invalid number." -ForegroundColor Yellow
+                }
+            }
+            "D" {
+                if ($Defaults) {
+                    $list.Clear()
+                    foreach ($item in $Defaults) { $list.Add($item) }
+                }
+            }
+            "" { return , $list.ToArray() }
+            default { Write-Host "Invalid choice." -ForegroundColor Yellow }
+        }
+    }
+}
+
+# Ask for a list of drives, showing the available drives, returns the new list
+function ReadDrives([string]$Title, [string[]]$Current, $AvailableDrives) {
+    Write-Host "`nAvailable drives:" -ForegroundColor Cyan
+    foreach ($drive in $AvailableDrives) {
+        Write-Host ("  {0}  {1,-20} {2,6} GB" -f $drive.DeviceID, $drive.VolumeName, [int]($drive.Size / 1GB))
+    }
+    $value = Read-Host "$Title, separated by commas, - for none [$(FormatList $Current)]"
+    if (-not $value) {
+        return , @($Current)
+    }
+    if ($value.Trim() -eq "-") {
+        return , @()
+    }
+    return , @(GetDriveLetters $value | Where-Object { $_ -match "^[A-Z]$" } | ForEach-Object { "$($_):" } | Select-Object -Unique)
+}
+
+# Edit the configuration interactively and save it to the configuration file
+function EditConfiguration {
+    $edited = [ordered]@{}
+    foreach ($key in $Settings.Keys) { $edited[$key] = $Settings[$key] }
+    # Normalize the values, they can come from the command line
+    $edited.NoCopy = [bool]$edited.NoCopy
+    $edited.ForceZip = [bool]$edited.ForceZip
+    $edited.SkipScan = @(GetDriveLetters $edited.SkipScan | ForEach-Object { "$($_):" } | Select-Object -Unique)
+    $edited.SkipCopy = @(GetDriveLetters $edited.SkipCopy | ForEach-Object { "$($_):" } | Select-Object -Unique)
+    $edited.CopyTo = @(SplitList $edited.CopyTo)
+    $edited.Exclusions = @($edited.Exclusions)
+    $availableDrives = GetLocalDrives -Quiet
+
+    while ($true) {
+        Clear-Host
+        Write-Host "Wizzz configuration" -ForegroundColor Cyan
+        Write-Host "$ConfigPath`n"
+        $wizTreeDisplay = if ($edited.WizTreePath) { $edited.WizTreePath } else { "(automatic)" }
+        $copyDisplay = if ($edited.NoCopy) { "No" } else { "Yes" }
+        $zipDisplay = if ($edited.ForceZip) { "Built-in Zip" } else { "7-Zip when installed" }
+        Write-Host "  1. Backup folder          $($edited.BackupRoot)"
+        Write-Host "  2. WizTree path           $wizTreeDisplay"
+        Write-Host "  3. Copy to other drives   $copyDisplay"
+        Write-Host "  4. Compression            $zipDisplay"
+        Write-Host "  5. Skip scanning          $(FormatList $edited.SkipScan)"
+        Write-Host "  6. Skip copying           $(FormatList $edited.SkipCopy)"
+        Write-Host "  7. Extra copy folders     $(FormatList $edited.CopyTo)"
+        Write-Host "  8. Exclusions             $(@($edited.Exclusions).Count) folders"
+        Write-Host "  9. Schedule               every $($edited.TaskDay) at $($edited.TaskTime)"
+        Write-Host ""
+        Write-Host "  S. Save and exit"
+        Write-Host "  Q. Quit without saving"
+        Write-Host ""
+
+        switch (Read-Host "Choice") {
+            "1" {
+                $value = Read-Host "Backup folder, full path [$($edited.BackupRoot)]"
+                if ($value) {
+                    if ($value -match "^[A-Za-z]:\\") {
+                        $edited.BackupRoot = $value.Trim()
+                    }
+                    else {
+                        Write-Host "Use a full path such as C:\Backup" -ForegroundColor Yellow
+                        Start-Sleep -Seconds 2
+                    }
+                }
+            }
+            "2" {
+                $value = Read-Host "Full path of WizTree.exe, - for automatic [$wizTreeDisplay]"
+                if ($value -eq "-") {
+                    $edited.WizTreePath = ""
+                }
+                elseif ($value) {
+                    if (-not (Test-Path $value -PathType Leaf)) {
+                        Write-Host "Warning: $value does not exist" -ForegroundColor Yellow
+                        Start-Sleep -Seconds 2
+                    }
+                    $edited.WizTreePath = $value.Trim()
+                }
+            }
+            "3" { $edited.NoCopy = -not $edited.NoCopy }
+            "4" { $edited.ForceZip = -not $edited.ForceZip }
+            "5" { $edited.SkipScan = ReadDrives -Title "Drives not to scan" -Current $edited.SkipScan -AvailableDrives $availableDrives }
+            "6" { $edited.SkipCopy = ReadDrives -Title "Drives not to copy the backup to" -Current $edited.SkipCopy -AvailableDrives $availableDrives }
+            "7" { $edited.CopyTo = EditList -Title "Extra folders the backup is copied to, e.g. G:\My Drive\Backup" -Items $edited.CopyTo }
+            "8" { $edited.Exclusions = EditList -Title "Excluded folders (* is a wildcard, folders end with \)" -Items $edited.Exclusions -Defaults $DefaultExclusions }
+            "9" {
+                $day = Read-Host "Day of the week [$($edited.TaskDay)]"
+                if ($day) {
+                    $match = $WeekDays | Where-Object { $_ -like "$($day.Trim())*" } | Select-Object -First 1
+                    if ($match) { $edited.TaskDay = $match } else { Write-Host "Invalid day." -ForegroundColor Yellow; Start-Sleep -Seconds 2 }
+                }
+                $time = Read-Host "Time, e.g. 23:12 [$($edited.TaskTime)]"
+                if ($time) {
+                    $parsed = [datetime]::MinValue
+                    if ([datetime]::TryParseExact($time.Trim(), "H:mm", [System.Globalization.CultureInfo]::InvariantCulture, "None", [ref]$parsed)) {
+                        $edited.TaskTime = $parsed.ToString("HH:mm")
+                    }
+                    else {
+                        Write-Host "Invalid time." -ForegroundColor Yellow
+                        Start-Sleep -Seconds 2
+                    }
+                }
+            }
+            "S" {
+                # Only save the settings that are different from the defaults,
+                # so new default values (e.g. exclusions) are used for the other ones
+                $toSave = [ordered]@{}
+                foreach ($key in $edited.Keys) {
+                    if ((ConvertTo-Json -InputObject $edited[$key] -Compress) -ne (ConvertTo-Json -InputObject $DefaultSettings[$key] -Compress)) {
+                        $toSave[$key] = $edited[$key]
+                    }
+                }
+                try {
+                    ConvertTo-Json -InputObject $toSave -Depth 3 | Set-Content -Path $ConfigPath -Encoding UTF8 -ErrorAction Stop
+                }
+                catch {
+                    Write-Error "Could not save the configuration file: $_"
+                    return $false
+                }
+                Write-Host "`nConfiguration saved to $ConfigPath" -ForegroundColor Green
+
+                # Install the task, or update it when the schedule changed
+                $script:BackupRoot = $edited.BackupRoot
+                $script:TaskDay = $edited.TaskDay
+                $script:TaskTime = $edited.TaskTime
+                $taskExists = [bool](Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)
+                $scheduleChanged = $edited.TaskDay -ne $Settings.TaskDay -or $edited.TaskTime -ne $Settings.TaskTime
+                if (-not $taskExists) {
+                    if (ConfirmChoice "Install the scheduled task to run the backup every $TaskDay at $($TaskTime)?") {
+                        return (InstallScheduledTask)
+                    }
+                }
+                elseif ($scheduleChanged) {
+                    if (ConfirmChoice "Update the scheduled task to run every $TaskDay at $($TaskTime)?") {
+                        return (InstallScheduledTask)
+                    }
+                }
+                return $true
+            }
+            "Q" { return $true }
+        }
+    }
+}
+
 # Display script information
 DisplayScriptInformation
 
@@ -262,6 +510,15 @@ if ($TaskDay -notin $WeekDays) {
     ExitScript 1
 }
 
+# Edit the configuration interactively, then exit
+if ($Configure) {
+    if ($Silent) {
+        Write-Output "-Configure cannot be used with -Silent."
+        ExitScript 1
+    }
+    ExitScript ([int](-not (EditConfiguration)))
+}
+
 # Register or remove the scheduled task, then exit
 if ($InstallTask -and $UninstallTask) {
     Write-Output "Use either -InstallTask or -UninstallTask, not both."
@@ -278,32 +535,9 @@ if ($UninstallTask) {
     ExitScript
 }
 if ($InstallTask) {
-    # The task runs this script silently with the configuration file and the same command line options,
-    # except the task options. The configuration file is read on each run, so it can be changed later.
-    $taskArgs = GetForwardedArguments $PSBoundParameters -Exclude "InstallTask", "UninstallTask", "TaskDay", "TaskTime", "Silent", "ConfigPath"
-    $taskCommand = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Silent -ConfigPath `"$ConfigPath`" $taskArgs".TrimEnd()
-    try {
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $taskCommand
-        $trigger = New-ScheduledTaskTrigger -Weekly -At $TaskTime -DaysOfWeek $TaskDay -ErrorAction Stop
-
-        # Run as the current user whether they are logged on or not, without storing a password (S4U)
-        $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-        $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType S4U -RunLevel Highest
-
-        # Run as soon as possible if the computer was off at the scheduled time, and also on battery
-        $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-
-        # Register the task, replacing it if it already exists
-        $null = Register-ScheduledTask -TaskName $TaskName -Description "Takes a copy of filesystem structure using WizTree and saves it in $BackupRoot" `
-            -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -ErrorAction Stop
-    }
-    catch {
-        Write-Error "Failed to register the scheduled task: $_"
-        ExitScript 1
-    }
-    Write-Output "Scheduled task '$TaskName' registered: every $TaskDay at $TaskTime"
-    Write-Output "Command: powershell.exe $taskCommand"
-    ExitScript
+    # Pass the options given on the command line, except the task options
+    $taskArgs = GetForwardedArguments $PSBoundParameters -Exclude "InstallTask", "UninstallTask", "TaskDay", "TaskTime", "Silent", "ConfigPath", "Configure"
+    ExitScript ([int](-not (InstallScheduledTask "$taskArgs")))
 }
 
 # Get the current date and time for creating a unique folder
@@ -336,22 +570,8 @@ if (-not $WizTreeExePath) {
 Write-Output "Using WizTree: $WizTreeExePath`n"
 
 
-# Get local fixed drives only (DriveType 3), skipping optical, removable and network drives
-$drives = Get-CimInstance Win32_LogicalDisk -Filter "DriveType = 3" | Select-Object DeviceID, VolumeName, Size, FreeSpace, FileSystem
-
-# Keep only drives on a real disk partition. Virtual drives such as Google Drive,
-# subst drives or RAM disks are reported as fixed drives but have no partition.
-$partitionLetters = Get-Partition -ErrorAction SilentlyContinue | Where-Object DriveLetter | ForEach-Object { $_.DriveLetter }
-if ($partitionLetters) {
-    $virtualDrives = $drives | Where-Object { $_.DeviceID[0] -notin $partitionLetters }
-    foreach ($drive in $virtualDrives) {
-        Write-Output "Skipping $($drive.DeviceID) $($drive.VolumeName): not on a disk partition (virtual drive)"
-    }
-    $drives = $drives | Where-Object { $_.DeviceID[0] -in $partitionLetters }
-}
-else {
-    Write-Warning "Could not list the disk partitions, virtual drives will not be skipped."
-}
+# Get the drives to back up
+$drives = GetLocalDrives
 
 # Normalize the drive and folder lists
 $SkipScan = @(GetDriveLetters $SkipScan)

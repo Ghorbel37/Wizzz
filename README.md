@@ -21,7 +21,8 @@ The script finds WizTree in its own folder or in the WizTree installation folder
 Use `-WizTreePath` if WizTree is installed somewhere else.
 
 ## Install
-This will create a scheduled task that runs the backup every Sunday at 23:12.
+Run `.\Wizzz_backup.ps1 -Configure` and save to set up the settings and the scheduled task,
+or install the task directly. This will create a scheduled task that runs the backup every Sunday at 23:12.
 If the computer is off at that time, the backup runs as soon as possible afterwards.
 The task runs whether you are logged on or not.
 
@@ -29,7 +30,7 @@ The task runs whether you are logged on or not.
 .\Wizzz_backup.ps1 -InstallTask
 ```
 
-The task uses the [configuration file](#configuration-file) and the other [options](#usage) given with `-InstallTask`:
+The task uses the [configuration](#configuration) and the other [options](#usage) given with `-InstallTask`:
 
 ```powershell
 # Every Friday at 02:00, without scanning E: and with a copy in Google Drive
@@ -98,8 +99,32 @@ To see the last results:
 Get-WinEvent -FilterHashtable @{ LogName = "Application"; ProviderName = "Wizzz" } -MaxEvents 10
 ```
 
-## Configuration file
-Settings can be saved in `Wizzz.config.json` next to the script, so they don't have to be given on each run.
+## Configuration
+The easiest way to set up Wizzz is the interactive configuration:
+
+```powershell
+.\Wizzz_backup.ps1 -Configure
+```
+
+```
+  1. Backup folder          C:\Backup
+  2. WizTree path           (automatic)
+  3. Copy to other drives   Yes
+  4. Compression            7-Zip when installed
+  5. Skip scanning          E:
+  6. Skip copying           (none)
+  7. Extra copy folders     G:\My Drive\Backup
+  8. Exclusions             16 folders
+  9. Schedule               every Sunday at 23:12
+
+  S. Save and exit
+  Q. Quit without saving
+```
+
+When saving, it offers to install the scheduled task, or to update it when the schedule changed.
+
+### Configuration file
+The settings are saved in `Wizzz.config.json` next to the script. It can also be edited by hand.
 All the settings are optional, missing ones use the default value:
 
 ```json
