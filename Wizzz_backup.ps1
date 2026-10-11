@@ -591,7 +591,15 @@ else {
 }
 $WizTreeExePath = $wizTreeCandidates | Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -First 1
 if (-not $WizTreeExePath) {
-    FailBackup "WizTree not found. Place the script in the WizTree folder, install WizTree or use -WizTreePath."
+    $message = "WizTree not found. Searched:`n$(($wizTreeCandidates | ForEach-Object { "  $_" }) -join "`n")`n"
+    $message += "Download and install WizTree from https://diskanalyzer.com/download or place this script in the WizTree folder.`n"
+    if ($WizTreePath) {
+        $message += "Check the WizTree path given with -WizTreePath or in the configuration (-Configure), or remove it to find WizTree automatically."
+    }
+    else {
+        $message += "If WizTree is somewhere else, give the full path of WizTree.exe with -WizTreePath or in the configuration (-Configure)."
+    }
+    FailBackup $message
 }
 Write-Output "Using WizTree: $WizTreeExePath`n"
 
