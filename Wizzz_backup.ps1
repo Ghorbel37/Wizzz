@@ -2,19 +2,21 @@
 #   -Silent    Accept all prompts automatically
 #   -NoCopy    Do not copy the backup to other drives
 #   -ForceZip  Use the built-in Zip compression even if 7-Zip is installed
+#   -BackupRoot   Full path of the folder where the backup is saved (default: C:\Backup)
+#                 The backup is copied to the same folder on the other drives
+#   -WizTreePath  Full path of WizTree.exe (default: looked up in the script folder,
+#                 then in the WizTree installation folder)
 param(
     [switch]$Silent,
     [switch]$NoCopy,
-    [switch]$ForceZip
+    [switch]$ForceZip,
+    [string]$BackupRoot = "C:\Backup",
+    [string]$WizTreePath
 )
 
 ##########################
 #####Global variables#####
 ##########################
-
-# Set the running location
-$RunLocation = $PSScriptRoot
-$BackupRoot = "C:\Backup"
 
 # Set the excluded folders ( Folders that have too many files )
 #Separate with pipe "|"
@@ -79,12 +81,24 @@ if (-not $isAdmin) {
     exit
 }
 
-# Check if the WizTree executable exists
-$WizTreeExePath = Join-Path $RunLocation "WizTree.exe"
-if (-not (Test-Path $WizTreeExePath -PathType Leaf)) {
-    Write-Output "WizTree.exe not found. Make sure it is in the script directory."
+# Find the WizTree executable
+if ($WizTreePath) {
+    $wizTreeCandidates = @($WizTreePath)
+}
+else {
+    $wizTreeCandidates = @(
+        (Join-Path $PSScriptRoot "WizTree.exe"),
+        (Join-Path $PSScriptRoot "WizTree64.exe"),
+        (Join-Path $env:ProgramFiles "WizTree\WizTree.exe"),
+        (Join-Path $env:ProgramFiles "WizTree\WizTree64.exe")
+    )
+}
+$WizTreeExePath = $wizTreeCandidates | Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -First 1
+if (-not $WizTreeExePath) {
+    Write-Output "WizTree not found. Place the script in the WizTree folder, install WizTree or use -WizTreePath."
     ExitScript 1
 }
+Write-Output "Using WizTree: $WizTreeExePath`n"
 
 # Get the current date and time for creating a unique folder
 $BackupFolderName = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -128,7 +142,7 @@ foreach ($drive in $drives) {
     $CsvName = ($drive.DeviceID[0] + "_%d_%t.csv")
     # Save backup
     Write-Output "Saving backup for $DriveName"
-    $wizTree = Start-Process -FilePath "$RunLocation\WizTree.exe" -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait -PassThru
+    $wizTree = Start-Process -FilePath $WizTreeExePath -ArgumentList "$DriveName /export=""$BackupLocation\$CsvName"" /admin=1 /filterexclude=$Excluded" -Wait -PassThru
 
     # Make sure WizTree exported a CSV for this drive
     $exportedCsv = Get-ChildItem -Path $BackupLocation -Filter ($drive.DeviceID[0] + "_*.csv") -ErrorAction SilentlyContinue
@@ -145,9 +159,15 @@ if (-not (Get-ChildItem -Path $BackupLocation -Filter "*.csv")) {
 }
 Write-Output "Backup complete`n"
 
-# Check if 7-Zip is installed
-$sevenZipPath = "C:\Program Files\7-Zip\7z.exe"
-$use7Zip = Test-Path $sevenZipPath
+# Check if 7-Zip is installed, using its registry entry, the usual install folders or the PATH
+$sevenZipCandidates = @(
+    (Get-ItemProperty -Path "HKLM:\SOFTWARE\7-Zip" -Name Path -ErrorAction SilentlyContinue).Path,
+    $env:ProgramFiles,
+    ${env:ProgramFiles(x86)}
+) | Where-Object { $_ } | ForEach-Object { Join-Path $_ "7z.exe"; Join-Path $_ "7-Zip\7z.exe" }
+$sevenZipCandidates += (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+$sevenZipPath = $sevenZipCandidates | Where-Object { $_ -and (Test-Path $_ -PathType Leaf) } | Select-Object -First 1
+$use7Zip = [bool]$sevenZipPath
 
 # Compressing all files
 if ($use7Zip -and -not $ForceZip) {
@@ -186,7 +206,7 @@ if (-not $NoCopy) {
 
     foreach ($drive in $drives) {
         if ($drive.DeviceID + "\" -ne $backupDrive) {
-            $destinationPath = Join-Path $drive.DeviceID "Backup"
+            $destinationPath = Join-Path $drive.DeviceID (Split-Path $BackupRoot -NoQualifier)
             $destinationFilePath = Join-Path $destinationPath $ArchiveName
 
             # Create Backup folder if it doesn't exist
