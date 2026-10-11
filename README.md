@@ -46,15 +46,34 @@ This will run the script and make a backup.
 | Option | Description |
 | --- | --- |
 | `-Silent` | Accept all prompts automatically |
-| `-NoCopy` | Do not copy the backup to the other drives |
+| `-NoCopy` | Do not copy the backup to the other drives (`-CopyTo` folders are still used) |
 | `-ForceZip` | Use the built-in Zip compression even if 7-Zip is installed |
 | `-BackupRoot <path>` | Full path of the folder where the backup is saved (default: `C:\Backup`) |
 | `-WizTreePath <path>` | Full path of `WizTree.exe` |
+| `-SkipScan <drives>` | Drives that are not exported, e.g. `-SkipScan "E:","F:"` |
+| `-SkipCopy <drives>` | Drives the backup is not copied to, e.g. `-SkipCopy "D:"` |
+| `-CopyTo <folders>` | Extra folders the backup is copied to, e.g. `-CopyTo "G:\My Drive\Backup"` |
+
+Lists can also be written as a single comma separated value, e.g. `-SkipScan "E:,F:"`.
 
 Each local fixed drive is exported to a CSV file and all the files are compressed into
 `Backup_<date>_<time>.7z` (or `.zip`) in the backup folder.
 The archive is then copied to the same folder on every other local fixed drive.
 Virtual drives that are not on a disk partition, such as the Google Drive drive, are skipped.
+
+`-CopyTo` adds folders to these automatic copies, they are not replaced.
+`-CopyTo` folders are always used, even on drives that are normally skipped,
+so it can be used to keep a copy in Google Drive or on a removable drive:
+
+```powershell
+# Copy to the other drives except D:, and to Google Drive
+.\Wizzz_backup.ps1 -SkipCopy "D:" -CopyTo "G:\My Drive\Backup"
+
+# Only copy to Google Drive
+.\Wizzz_backup.ps1 -NoCopy -CopyTo "G:\My Drive\Backup"
+```
+
+Before starting, the script shows which drives will be scanned and where the backup will be copied.
 
 Each run is logged to `<BackupRoot>\Logs`. The script exits with code 1 when something failed.
 

@@ -6,26 +6,39 @@
 #                 The backup is copied to the same folder on the other drives
 #   -WizTreePath  Full path of WizTree.exe (default: looked up in the script folder,
 #                 then in the WizTree installation folder)
+#   -SkipScan  Drives that are not exported, e.g. -SkipScan "E:","F:"
+#   -SkipCopy  Drives the backup is not copied to, e.g. -SkipCopy "D:"
+#   -CopyTo    Extra folders the backup is copied to, e.g. -CopyTo "G:\My Drive\Backup"
+#              They are added to the automatic copies (use -NoCopy to only copy to them)
+# Lists can also be given as a single comma separated value, e.g. -SkipScan "E:,F:"
 param(
     [switch]$Silent,
     [switch]$NoCopy,
     [switch]$ForceZip,
     [string]$BackupRoot = "C:\Backup",
-    [string]$WizTreePath
+    [string]$WizTreePath,
+    [string[]]$SkipScan = @(),
+    [string[]]$SkipCopy = @(),
+    [string[]]$CopyTo = @()
 )
 
 ##########################
 #####Global variables#####
 ##########################
 
+# Split comma separated values and remove empty entries
+function SplitList([string[]]$Values) {
+    $Values | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+}
+
+# Get the drive letters, accepting "E", "E:" or "E:\"
+function GetDriveLetters([string[]]$Values) {
+    SplitList $Values | ForEach-Object { $_.Substring(0, 1).ToUpper() }
+}
+
 # Set the excluded folders ( Folders that have too many files )
 #Separate with pipe "|"
 $Excluded = """$env:WINDIR""|""$env:LOCALAPPDATA\Yarn\"""
-
-# Locations that should have backup folder
-# Separate with comma ","
-
-# $destinationDrives = "D:", "E:", "F:"
 
 ##########################
 ###Global variables end###
@@ -75,7 +88,11 @@ if (-not $isAdmin) {
             if ($param.Value) { "-$($param.Key)" }
         }
         else {
-            "-$($param.Key) `"$($param.Value)`""
+            # Lists are passed as a single comma separated value
+            $value = @($param.Value) -join ","
+            # A trailing backslash would escape the closing quote, double it
+            if ($value.EndsWith("\")) { $value += "\" }
+            "-$($param.Key) `"$value`""
         }
     }
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" $forwardedArgs" -Verb RunAs
@@ -130,9 +147,61 @@ else {
     Write-Warning "Could not list the disk partitions, virtual drives will not be skipped."
 }
 
+# Normalize the drive and folder lists
+$SkipScan = @(GetDriveLetters $SkipScan)
+$SkipCopy = @(GetDriveLetters $SkipCopy)
+$CopyTo = @(SplitList $CopyTo)
+
+# Warn about skipped drives that are not in the list, probably a typo
+$driveLetters = $drives | ForEach-Object { $_.DeviceID.Substring(0, 1) }
+foreach ($letter in ($SkipScan + $SkipCopy | Select-Object -Unique)) {
+    if ($letter -notin $driveLetters) {
+        Write-Warning "Drive $($letter): is skipped but is not one of the drives to back up"
+    }
+}
+
+# Drives to export with WizTree
+$scanDrives = $drives | Where-Object { $_.DeviceID.Substring(0, 1) -notin $SkipScan }
+
+# Folders the backup is copied to: the backup folder on the other drives, then the -CopyTo folders
+$backupDriveLetter = [System.IO.Path]::GetPathRoot($BackupRoot).Substring(0, 1)
+$copyTargets = @()
+if (-not $NoCopy) {
+    foreach ($drive in $drives) {
+        $letter = $drive.DeviceID.Substring(0, 1)
+        if ($letter -ne $backupDriveLetter -and $letter -notin $SkipCopy) {
+            $copyTargets += Join-Path $drive.DeviceID (Split-Path $BackupRoot -NoQualifier)
+        }
+    }
+}
+$copyTargets += $CopyTo | Where-Object { $_.TrimEnd("\") -ne $BackupRoot.TrimEnd("\") }
+# Remove duplicates, ignoring case and trailing backslashes
+$copyTargets = @($copyTargets | Group-Object { $_.TrimEnd("\") } | ForEach-Object { $_.Group[0] })
+
 # Display the drives in a table with additional information
-Write-Host "Drives to back up:`n"
-$drives | Format-Table -AutoSize
+Write-Host "Drives:"
+$drives | Select-Object @{ Name = "Drive"; Expression = { $_.DeviceID } },
+    @{ Name = "Name"; Expression = { $_.VolumeName } },
+    @{ Name = "Size (GB)"; Expression = { [int]($_.Size / 1GB) } },
+    @{ Name = "Free (GB)"; Expression = { [int]($_.FreeSpace / 1GB) } },
+    @{ Name = "Scan"; Expression = { if ($_.DeviceID.Substring(0, 1) -in $SkipScan) { "No" } else { "Yes" } } },
+    @{ Name = "Copy"; Expression = {
+            $deviceId = $_.DeviceID
+            if ($deviceId.Substring(0, 1) -eq $backupDriveLetter) { "Backup folder" }
+            elseif ($copyTargets | Where-Object { $_.StartsWith($deviceId, [System.StringComparison]::OrdinalIgnoreCase) }) { "Yes" }
+            else { "No" }
+        }
+    } | Format-Table -AutoSize | Out-Host
+
+Write-Host "Backup folder: $BackupRoot"
+if ($copyTargets) {
+    Write-Host "Copies:"
+    $copyTargets | ForEach-Object { Write-Host "  $_" }
+}
+else {
+    Write-Host "Copies: none"
+}
+Write-Host ""
 
 
 # Ask for confirmation
@@ -158,7 +227,7 @@ Write-Output "Done.`n"
 $failures = @()
 
 # Export each drive
-foreach ($drive in $drives) {
+foreach ($drive in $scanDrives) {
     # Get DriveName And CsvName
     $DriveName = $drive.DeviceID
     $CsvName = ($drive.DeviceID[0] + "_%d_%t.csv")
@@ -222,38 +291,29 @@ if ($compressionFailed -or -not (Test-Path $ArchivePath -PathType Leaf)) {
 }
 Write-Output "Compression done.`n"
 
-# Copy the backup to all drives unless -NoCopy argument is passed
-if (-not $NoCopy) {
-    $copiedTo = @()
-
-    # Fetch drive in $BackupRoot
-    $backupDrive = [System.IO.Path]::GetPathRoot($BackupRoot)
-
-    foreach ($drive in $drives) {
-        if ($drive.DeviceID + "\" -ne $backupDrive) {
-            $destinationPath = Join-Path $drive.DeviceID (Split-Path $BackupRoot -NoQualifier)
-            $destinationFilePath = Join-Path $destinationPath $ArchiveName
-
-            # Create Backup folder if it doesn't exist
-            if (-not (Test-Path $destinationPath -PathType Container)) {
-                $null = New-Item -ItemType Directory -Path $destinationPath -Force
-            }
-
-            Write-Output "Copying backup to $($drive.DeviceID)"
-            try {
-                Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force -ErrorAction Stop
-                $copiedTo += $destinationFilePath
-            }
-            catch {
-                Write-Warning "Failed to copy backup to $($drive.DeviceID): $_"
-                $failures += "Copy to $($drive.DeviceID)"
-            }
+# Copy the backup to the other drives and the -CopyTo folders
+$copiedTo = @()
+foreach ($destinationPath in $copyTargets) {
+    $destinationFilePath = Join-Path $destinationPath $ArchiveName
+    Write-Output "Copying backup to $destinationPath"
+    try {
+        # Create the destination folder if it doesn't exist
+        if (-not (Test-Path $destinationPath -PathType Container)) {
+            $null = New-Item -ItemType Directory -Path $destinationPath -Force -ErrorAction Stop
         }
+        Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force -ErrorAction Stop
+        $copiedTo += $destinationFilePath
     }
+    catch {
+        Write-Warning "Failed to copy backup to $($destinationPath): $_"
+        $failures += "Copy to $destinationPath"
+    }
+}
+if ($copyTargets) {
     Write-Output "Copying done.`n"
 }
 else {
-    Write-Output "Skipping backup copy to other drives as '-NoCopy' argument was used."
+    Write-Output "No copies to make.`n"
 }
 
 # Cleanup temp CSV files
