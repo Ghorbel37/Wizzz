@@ -1,6 +1,6 @@
 <h1 align="center">Welcome to Wizzz 👋</h1>
 <p>
-  <a href="#" target="_blank">
+  <a href="LICENSE">
     <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg" />
   </a>
 </p>
@@ -12,7 +12,7 @@
 
 ## Requirements
 * Windows with PowerShell 5.1 or PowerShell 7
-* [WizTree](https://diskanalyzer.com/) installed
+* [WizTree](https://diskanalyzer.com/download) installed
 * [7-Zip](https://www.7-zip.org/) (optional). It is used when installed, giving archives about half the size
   of the built-in Zip (PPMd compression, which works best on the CSV text).
   Otherwise the built-in Zip compression is used and the script recommends installing 7-Zip.
