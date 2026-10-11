@@ -210,6 +210,8 @@ Write-Output "Compression done.`n"
 
 # Copy the backup to all drives unless -NoCopy argument is passed
 if (-not $NoCopy) {
+    $copiedTo = @()
+
     # Fetch drive in $BackupRoot
     $backupDrive = [System.IO.Path]::GetPathRoot($BackupRoot)
 
@@ -220,12 +222,13 @@ if (-not $NoCopy) {
 
             # Create Backup folder if it doesn't exist
             if (-not (Test-Path $destinationPath -PathType Container)) {
-                New-Item -ItemType Directory -Path $destinationPath -Force
+                $null = New-Item -ItemType Directory -Path $destinationPath -Force
             }
 
             Write-Output "Copying backup to $($drive.DeviceID)"
             try {
                 Copy-Item -Path $ArchivePath -Destination $destinationFilePath -Force -ErrorAction Stop
+                $copiedTo += $destinationFilePath
             }
             catch {
                 Write-Warning "Failed to copy backup to $($drive.DeviceID): $_"
@@ -270,7 +273,11 @@ if ($failures) {
 else {
     Write-Host "Backup completed successfully."
 }
-Write-Host "Saved file to: *:\Backup\$ArchiveName `n"
+Write-Host "Saved file to: $ArchivePath"
+if ($copiedTo) {
+    Write-Host "Copied to: $($copiedTo -join ', ')"
+}
+Write-Host ""
 ExitScript ([int][bool]$failures)
 
 # End of script
