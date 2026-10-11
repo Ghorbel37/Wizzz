@@ -23,17 +23,30 @@ Use `-WizTreePath` if WizTree is installed somewhere else.
 ## Install
 This will create a scheduled task that runs the backup every Sunday at 23:12.
 If the computer is off at that time, the backup runs as soon as possible afterwards.
-Make sure to run it from an elevated PowerShell prompt.
+The task runs whether you are logged on or not.
 
 ```powershell
-.\Wizzz_create_task.ps1
+.\Wizzz_backup.ps1 -InstallTask
 ```
 
-## Uninstall
-Remove the scheduled task from an elevated PowerShell prompt.
+All the other [options](#usage) given with `-InstallTask` are used by the task:
 
 ```powershell
-Unregister-ScheduledTask -TaskName "Wiztree Filesystem Backup"
+# Every Friday at 02:00, without scanning E: and with a copy in Google Drive
+.\Wizzz_backup.ps1 -InstallTask -TaskDay Friday -TaskTime 02:00 -SkipScan "E:" -CopyTo "G:\My Drive\Backup"
+```
+
+| Option | Description |
+| --- | --- |
+| `-InstallTask` | Register the scheduled task, then exit. Running it again replaces the task. |
+| `-UninstallTask` | Remove the scheduled task, then exit |
+| `-TaskDay <day>` | Day of the week the task runs (default: `Sunday`) |
+| `-TaskTime <time>` | Time the task runs (default: `23:12`) |
+
+## Uninstall
+
+```powershell
+.\Wizzz_backup.ps1 -UninstallTask
 ```
 
 ## Usage

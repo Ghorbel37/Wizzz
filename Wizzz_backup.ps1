@@ -11,6 +11,13 @@
 #   -CopyTo    Extra folders the backup is copied to, e.g. -CopyTo "G:\My Drive\Backup"
 #              They are added to the automatic copies (use -NoCopy to only copy to them)
 # Lists can also be given as a single comma separated value, e.g. -SkipScan "E:,F:"
+#
+# Scheduled task
+#   -InstallTask    Register a scheduled task that runs the backup with the other options
+#                   given on the command line, then exit. Running it again replaces the task.
+#   -UninstallTask  Remove the scheduled task, then exit
+#   -TaskDay        Day of the week the task runs (default: Sunday)
+#   -TaskTime       Time the task runs (default: 23:12)
 param(
     [switch]$Silent,
     [switch]$NoCopy,
@@ -19,7 +26,12 @@ param(
     [string]$WizTreePath,
     [string[]]$SkipScan = @(),
     [string[]]$SkipCopy = @(),
-    [string[]]$CopyTo = @()
+    [string[]]$CopyTo = @(),
+    [switch]$InstallTask,
+    [switch]$UninstallTask,
+    [ValidateSet("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")]
+    [string]$TaskDay = "Sunday",
+    [string]$TaskTime = "23:12"
 )
 
 ##########################
@@ -35,6 +47,28 @@ function SplitList([string[]]$Values) {
 function GetDriveLetters([string[]]$Values) {
     SplitList $Values | ForEach-Object { $_.Substring(0, 1).ToUpper() }
 }
+
+# Build the command line arguments for the given parameters, except the excluded ones
+function GetForwardedArguments($Parameters, [string[]]$Exclude = @()) {
+    foreach ($param in $Parameters.GetEnumerator()) {
+        if ($param.Key -in $Exclude) {
+            continue
+        }
+        if ($param.Value -is [switch]) {
+            if ($param.Value) { "-$($param.Key)" }
+        }
+        else {
+            # Lists are passed as a single comma separated value
+            $value = @($param.Value) -join ","
+            # A trailing backslash would escape the closing quote, double it
+            if ($value.EndsWith("\")) { $value += "\" }
+            "-$($param.Key) `"$value`""
+        }
+    }
+}
+
+# Name of the scheduled task
+$TaskName = "Wiztree Filesystem Backup"
 
 # Set the excluded folders ( Folders that have too many files )
 #Separate with pipe "|"
@@ -83,20 +117,52 @@ if (-not $isAdmin) {
     Write-Output "It will restart itself with administrator privileges."
     WaitForKeyPress
     # Forward the parameters so the elevated instance behaves the same way
-    $forwardedArgs = foreach ($param in $PSBoundParameters.GetEnumerator()) {
-        if ($param.Value -is [switch]) {
-            if ($param.Value) { "-$($param.Key)" }
-        }
-        else {
-            # Lists are passed as a single comma separated value
-            $value = @($param.Value) -join ","
-            # A trailing backslash would escape the closing quote, double it
-            if ($value.EndsWith("\")) { $value += "\" }
-            "-$($param.Key) `"$value`""
-        }
-    }
+    $forwardedArgs = GetForwardedArguments $PSBoundParameters
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" $forwardedArgs" -Verb RunAs
     exit
+}
+
+# Register or remove the scheduled task, then exit
+if ($InstallTask -and $UninstallTask) {
+    Write-Output "Use either -InstallTask or -UninstallTask, not both."
+    ExitScript 1
+}
+if ($UninstallTask) {
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+        Write-Output "Scheduled task '$TaskName' removed."
+    }
+    else {
+        Write-Output "Scheduled task '$TaskName' does not exist."
+    }
+    ExitScript
+}
+if ($InstallTask) {
+    # The task runs this script silently with the same options, except the task options
+    $taskArgs = GetForwardedArguments $PSBoundParameters -Exclude "InstallTask", "UninstallTask", "TaskDay", "TaskTime", "Silent"
+    $taskCommand = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Silent $taskArgs".TrimEnd()
+    try {
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $taskCommand
+        $trigger = New-ScheduledTaskTrigger -Weekly -At $TaskTime -DaysOfWeek $TaskDay -ErrorAction Stop
+
+        # Run as the current user whether they are logged on or not, without storing a password (S4U)
+        $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType S4U -RunLevel Highest
+
+        # Run as soon as possible if the computer was off at the scheduled time, and also on battery
+        $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+
+        # Register the task, replacing it if it already exists
+        $null = Register-ScheduledTask -TaskName $TaskName -Description "Takes a copy of filesystem structure using WizTree and saves it in $BackupRoot" `
+            -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Error "Failed to register the scheduled task: $_"
+        ExitScript 1
+    }
+    Write-Output "Scheduled task '$TaskName' registered: every $TaskDay at $TaskTime"
+    Write-Output "Command: powershell.exe $taskCommand"
+    ExitScript
 }
 
 # Get the current date and time for creating a unique folder
