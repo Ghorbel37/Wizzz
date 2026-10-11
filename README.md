@@ -29,7 +29,7 @@ The task runs whether you are logged on or not.
 .\Wizzz_backup.ps1 -InstallTask
 ```
 
-All the other [options](#usage) given with `-InstallTask` are used by the task:
+The task uses the [configuration file](#configuration-file) and the other [options](#usage) given with `-InstallTask`:
 
 ```powershell
 # Every Friday at 02:00, without scanning E: and with a copy in Google Drive
@@ -98,12 +98,38 @@ To see the last results:
 Get-WinEvent -FilterHashtable @{ LogName = "Application"; ProviderName = "Wizzz" } -MaxEvents 10
 ```
 
+## Configuration file
+Settings can be saved in `Wizzz.config.json` next to the script, so they don't have to be given on each run.
+All the settings are optional, missing ones use the default value:
+
+```json
+{
+  "BackupRoot": "C:\\Backup",
+  "WizTreePath": "",
+  "NoCopy": false,
+  "ForceZip": false,
+  "SkipScan": ["E:"],
+  "SkipCopy": ["D:"],
+  "CopyTo": ["G:\\My Drive\\Backup"],
+  "Exclusions": ["%WINDIR%", "*\\node_modules\\"],
+  "TaskDay": "Sunday",
+  "TaskTime": "23:12"
+}
+```
+
+Options given on the command line override the configuration file.
+Use `-ConfigPath <file>` to use another configuration file.
+The scheduled task reads the configuration file on each run, so changes are used without reinstalling the task,
+except `TaskDay` and `TaskTime` which need `-InstallTask` to be run again.
+
 ## Exclusions
 Folders with many files that are not useful in a backup are left out of the export:
 the Windows folder, the recycle bin, temporary files, package manager caches
 (npm, Yarn, pip, NuGet, Gradle, Maven, Cargo) and project dependencies
 (`node_modules`, `.git`, `__pycache__`, `.venv`).
 The full list is `$DefaultExclusions` at the top of `Wizzz_backup.ps1`.
+Set `Exclusions` in the configuration file to use your own list instead.
+It uses the WizTree filter syntax: `*` is a wildcard and folders end with a backslash.
 
 ## Reading a backup
 Extract the archive and open the CSV file of a drive in WizTree (`File > Open`)

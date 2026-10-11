@@ -11,10 +11,13 @@
 #   -CopyTo    Extra folders the backup is copied to, e.g. -CopyTo "G:\My Drive\Backup"
 #              They are added to the automatic copies (use -NoCopy to only copy to them)
 # Lists can also be given as a single comma separated value, e.g. -SkipScan "E:,F:"
+#   -ConfigPath  Configuration file (default: Wizzz.config.json next to this script)
+#                Options given on the command line override the configuration file.
 #
 # Scheduled task
-#   -InstallTask    Register a scheduled task that runs the backup with the other options
-#                   given on the command line, then exit. Running it again replaces the task.
+#   -InstallTask    Register a scheduled task that runs the backup with the configuration file
+#                   and the other options given on the command line, then exit.
+#                   Running it again replaces the task.
 #   -UninstallTask  Remove the scheduled task, then exit
 #   -TaskDay        Day of the week the task runs (default: Sunday)
 #   -TaskTime       Time the task runs (default: 23:12)
@@ -22,16 +25,16 @@ param(
     [switch]$Silent,
     [switch]$NoCopy,
     [switch]$ForceZip,
-    [string]$BackupRoot = "C:\Backup",
+    [string]$BackupRoot,
     [string]$WizTreePath,
     [string[]]$SkipScan = @(),
     [string[]]$SkipCopy = @(),
     [string[]]$CopyTo = @(),
     [switch]$InstallTask,
     [switch]$UninstallTask,
-    [ValidateSet("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")]
-    [string]$TaskDay = "Sunday",
-    [string]$TaskTime = "23:12"
+    [string]$TaskDay,
+    [string]$TaskTime,
+    [string]$ConfigPath = (Join-Path $PSScriptRoot "Wizzz.config.json")
 )
 
 ##########################
@@ -107,7 +110,39 @@ $DefaultExclusions = @(
     '*\__pycache__\',
     '*\.venv\'
 )
-$Exclusions = $DefaultExclusions
+
+# Default settings, overridden by the configuration file, then by the command line
+$DefaultSettings = [ordered]@{
+    BackupRoot  = "C:\Backup"
+    WizTreePath = ""
+    NoCopy      = $false
+    ForceZip    = $false
+    SkipScan    = @()
+    SkipCopy    = @()
+    CopyTo      = @()
+    Exclusions  = $DefaultExclusions
+    TaskDay     = "Sunday"
+    TaskTime    = "23:12"
+}
+$WeekDays = "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+
+# Read the configuration file, returns the settings it contains
+function ReadConfig([string]$Path) {
+    $config = [ordered]@{}
+    if (-not (Test-Path $Path -PathType Leaf)) {
+        return $config
+    }
+    $json = Get-Content -Path $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    foreach ($property in $json.PSObject.Properties) {
+        if ($property.Name -in $DefaultSettings.Keys) {
+            $config[$property.Name] = $property.Value
+        }
+        else {
+            Write-Warning "Unknown setting '$($property.Name)' in $Path"
+        }
+    }
+    return $config
+}
 
 # Build the WizTree exclusion filter, separated with pipe "|"
 function GetExclusionFilter([string[]]$Patterns) {
@@ -170,6 +205,12 @@ function FailBackup([string]$Message) {
 # Display script information
 DisplayScriptInformation
 
+# Use the full path of the configuration file, the elevated instance and the task start in another folder
+$ConfigPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ConfigPath)
+if ($PSBoundParameters.ContainsKey("ConfigPath")) {
+    $PSBoundParameters["ConfigPath"] = $ConfigPath
+}
+
 
 # Check if the script is running with elevated privileges and restart it if not
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -181,6 +222,44 @@ if (-not $isAdmin) {
     $forwardedArgs = GetForwardedArguments $PSBoundParameters
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" $forwardedArgs" -Verb RunAs
     exit
+}
+
+# Load the settings: defaults, then the configuration file, then the command line
+try {
+    $config = ReadConfig $ConfigPath
+}
+catch {
+    Write-Error "Could not read the configuration file $($ConfigPath): $_"
+    ExitScript 1
+}
+$Settings = [ordered]@{}
+foreach ($key in $DefaultSettings.Keys) {
+    if ($PSBoundParameters.ContainsKey($key)) {
+        $Settings[$key] = $PSBoundParameters[$key]
+    }
+    elseif ($config.Contains($key)) {
+        $Settings[$key] = $config[$key]
+    }
+    else {
+        $Settings[$key] = $DefaultSettings[$key]
+    }
+}
+if ($config.Count) {
+    Write-Output "Using configuration file $ConfigPath`n"
+}
+$BackupRoot = $Settings.BackupRoot
+$WizTreePath = $Settings.WizTreePath
+$NoCopy = [bool]$Settings.NoCopy
+$ForceZip = [bool]$Settings.ForceZip
+$SkipScan = @($Settings.SkipScan)
+$SkipCopy = @($Settings.SkipCopy)
+$CopyTo = @($Settings.CopyTo)
+$Exclusions = @($Settings.Exclusions)
+$TaskDay = $Settings.TaskDay
+$TaskTime = $Settings.TaskTime
+if ($TaskDay -notin $WeekDays) {
+    Write-Error "Invalid TaskDay '$TaskDay', use one of: $($WeekDays -join ', ')"
+    ExitScript 1
 }
 
 # Register or remove the scheduled task, then exit
@@ -199,9 +278,10 @@ if ($UninstallTask) {
     ExitScript
 }
 if ($InstallTask) {
-    # The task runs this script silently with the same options, except the task options
-    $taskArgs = GetForwardedArguments $PSBoundParameters -Exclude "InstallTask", "UninstallTask", "TaskDay", "TaskTime", "Silent"
-    $taskCommand = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Silent $taskArgs".TrimEnd()
+    # The task runs this script silently with the configuration file and the same command line options,
+    # except the task options. The configuration file is read on each run, so it can be changed later.
+    $taskArgs = GetForwardedArguments $PSBoundParameters -Exclude "InstallTask", "UninstallTask", "TaskDay", "TaskTime", "Silent", "ConfigPath"
+    $taskCommand = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Silent -ConfigPath `"$ConfigPath`" $taskArgs".TrimEnd()
     try {
         $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $taskCommand
         $trigger = New-ScheduledTaskTrigger -Weekly -At $TaskTime -DaysOfWeek $TaskDay -ErrorAction Stop
