@@ -54,6 +54,7 @@ This will run the script and make a backup.
 Each local fixed drive is exported to a CSV file and all the files are compressed into
 `Backup_<date>_<time>.7z` (or `.zip`) in the backup folder.
 The archive is then copied to the same folder on every other local fixed drive.
+Virtual drives that are not on a disk partition, such as the Google Drive drive, are skipped.
 
 Each run is logged to `<BackupRoot>\Logs`. The script exits with code 1 when something failed.
 

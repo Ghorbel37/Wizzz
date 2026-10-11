@@ -116,6 +116,20 @@ Write-Output "Using WizTree: $WizTreeExePath`n"
 # Get local fixed drives only (DriveType 3), skipping optical, removable and network drives
 $drives = Get-CimInstance Win32_LogicalDisk -Filter "DriveType = 3" | Select-Object DeviceID, VolumeName, Size, FreeSpace, FileSystem
 
+# Keep only drives on a real disk partition. Virtual drives such as Google Drive,
+# subst drives or RAM disks are reported as fixed drives but have no partition.
+$partitionLetters = Get-Partition -ErrorAction SilentlyContinue | Where-Object DriveLetter | ForEach-Object { $_.DriveLetter }
+if ($partitionLetters) {
+    $virtualDrives = $drives | Where-Object { $_.DeviceID[0] -notin $partitionLetters }
+    foreach ($drive in $virtualDrives) {
+        Write-Output "Skipping $($drive.DeviceID) $($drive.VolumeName): not on a disk partition (virtual drive)"
+    }
+    $drives = $drives | Where-Object { $_.DeviceID[0] -in $partitionLetters }
+}
+else {
+    Write-Warning "Could not list the disk partitions, virtual drives will not be skipped."
+}
+
 # Display the drives in a table with additional information
 Write-Host "Drives to back up:`n"
 $drives | Format-Table -AutoSize
