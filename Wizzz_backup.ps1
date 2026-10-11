@@ -42,6 +42,20 @@ function DisplayScriptInformation() {
     Write-Host "`n`n"
 }
 
+# Wait for a key press, unless running in silent mode (e.g. from the scheduled task)
+function WaitForKeyPress([string]$Message = "Press any key to continue...") {
+    if (-not $Silent) {
+        Write-Output $Message
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    }
+}
+
+# Exit the script with the given exit code
+function ExitScript([int]$ExitCode = 0) {
+    WaitForKeyPress "Press any key to exit..."
+    exit $ExitCode
+}
+
 # Display script information
 DisplayScriptInformation
 
@@ -51,8 +65,7 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIde
 if (-not $isAdmin) {
     Write-Output "This script needs to run as an administrator"
     Write-Output "It will restart itself with administrator privileges."
-    Write-Output "Press any key to continue..."
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    WaitForKeyPress
     # Forward the parameters so the elevated instance behaves the same way
     $forwardedArgs = foreach ($param in $PSBoundParameters.GetEnumerator()) {
         if ($param.Value -is [switch]) {
@@ -70,9 +83,7 @@ if (-not $isAdmin) {
 $WizTreeExePath = Join-Path $RunLocation "WizTree.exe"
 if (-not (Test-Path $WizTreeExePath -PathType Leaf)) {
     Write-Output "WizTree.exe not found. Make sure it is in the script directory."
-    Write-Output "Press any key to exit..."
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    exit
+    ExitScript 1
 }
 
 # Get the current date and time for creating a unique folder
@@ -96,9 +107,7 @@ if (-not $Silent) {
     }
     if ($confirmation -ne 'Y') {
         Write-Host "Backup aborted."
-        Write-Output "Press any key to exit..."
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        exit
+        ExitScript
     }
 }
 
@@ -190,9 +199,6 @@ else {
 # Prompt to press any key to exit
 Write-Host "Backup completed successfully."
 Write-Host "Saved file to: *:\Backup\$ArchiveName `n"
-if (-not $Silent) {
-    Write-Output "Press any key to exit..."
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-}
+WaitForKeyPress "Press any key to exit..."
 
 # End of script
