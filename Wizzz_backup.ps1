@@ -386,7 +386,16 @@ Write-Output "Compression done.`n"
 
 # Copy the backup to the other drives and the -CopyTo folders
 $copiedTo = @()
+$notConnected = @()
 foreach ($destinationPath in $copyTargets) {
+    # Skip destinations on a drive that is not connected, e.g. an unplugged external drive
+    $destinationRoot = [System.IO.Path]::GetPathRoot($destinationPath)
+    if (-not (Test-Path $destinationRoot)) {
+        Write-Output "Skipping $($destinationPath): drive $destinationRoot is not connected"
+        $notConnected += $destinationPath
+        continue
+    }
+
     $destinationFilePath = Join-Path $destinationPath $ArchiveName
     Write-Output "Copying backup to $destinationPath"
     try {
@@ -443,6 +452,9 @@ else {
 Write-Host "Saved file to: $ArchivePath"
 if ($copiedTo) {
     Write-Host "Copied to: $($copiedTo -join ', ')"
+}
+if ($notConnected) {
+    Write-Host "Not copied, drive not connected: $($notConnected -join ', ')"
 }
 Write-Host ""
 ExitScript ([int][bool]$failures)
