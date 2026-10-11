@@ -90,6 +90,14 @@ Before starting, the script shows which drives will be scanned and where the bac
 
 Each run is logged to `<BackupRoot>\Logs`. The script exits with code 1 when something failed.
 
+The result of each run is also written to the Windows Application event log, under the `Wizzz` source
+(event ID 1 = success, 2 = completed with errors, 3 = failed).
+To see the last results:
+
+```powershell
+Get-WinEvent -FilterHashtable @{ LogName = "Application"; ProviderName = "Wizzz" } -MaxEvents 10
+```
+
 ## Exclusions
 Folders with many files that are not useful in a backup are left out of the export:
 the Windows folder, the recycle bin, temporary files, package manager caches

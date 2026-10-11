@@ -146,6 +146,27 @@ function ExitScript([int]$ExitCode = 0) {
     exit $ExitCode
 }
 
+# Write an entry to the Windows Application event log, under the "Wizzz" source
+# Event IDs: 1 = backup succeeded, 2 = backup completed with errors, 3 = backup failed
+function WriteEvent([string]$EntryType, [int]$EventId, [string]$Message) {
+    try {
+        if (-not [System.Diagnostics.EventLog]::SourceExists("Wizzz")) {
+            [System.Diagnostics.EventLog]::CreateEventSource("Wizzz", "Application")
+        }
+        [System.Diagnostics.EventLog]::WriteEntry("Wizzz", $Message, $EntryType, $EventId)
+    }
+    catch {
+        Write-Warning "Could not write to the event log: $_"
+    }
+}
+
+# Stop the backup after an error: log it to the event log and exit
+function FailBackup([string]$Message) {
+    Write-Error $Message
+    WriteEvent -EntryType "Error" -EventId 3 -Message "Backup failed: $Message`nLog: $LogPath"
+    ExitScript 1
+}
+
 # Display script information
 DisplayScriptInformation
 
@@ -230,8 +251,7 @@ else {
 }
 $WizTreeExePath = $wizTreeCandidates | Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -First 1
 if (-not $WizTreeExePath) {
-    Write-Output "WizTree not found. Place the script in the WizTree folder, install WizTree or use -WizTreePath."
-    ExitScript 1
+    FailBackup "WizTree not found. Place the script in the WizTree folder, install WizTree or use -WizTreePath."
 }
 Write-Output "Using WizTree: $WizTreeExePath`n"
 
@@ -325,8 +345,7 @@ if (-not $Silent) {
 # Make sure there is room for the exported CSV files
 $backupFreeSpace = GetFreeSpace $BackupRoot
 if ($null -ne $backupFreeSpace -and $backupFreeSpace -lt $MinFreeSpace) {
-    Write-Error "Not enough free space in $BackupRoot ($([math]::Round($backupFreeSpace / 1GB, 2)) GB free, $($MinFreeSpace / 1GB) GB needed)"
-    ExitScript 1
+    FailBackup "Not enough free space in $BackupRoot ($([math]::Round($backupFreeSpace / 1GB, 2)) GB free, $($MinFreeSpace / 1GB) GB needed)"
 }
 
 # Create a new folder for each backup
@@ -358,8 +377,7 @@ foreach ($drive in $scanDrives) {
 
 # Stop if nothing was exported, there is nothing to compress
 if (-not (Get-ChildItem -Path $BackupLocation -Filter "*.csv")) {
-    Write-Error "No drive was exported, aborting."
-    ExitScript 1
+    FailBackup "No drive was exported."
 }
 Write-Output "Backup complete`n"
 
@@ -399,8 +417,7 @@ else {
 
 # Keep the exported CSV files if the compression failed
 if ($compressionFailed -or -not (Test-Path $ArchivePath -PathType Leaf)) {
-    Write-Error "Compression failed. The exported CSV files were kept in $BackupLocation"
-    ExitScript 1
+    FailBackup "Compression failed. The exported CSV files were kept in $BackupLocation"
 }
 Write-Output "Compression done.`n"
 
@@ -474,9 +491,11 @@ else {
 if ($failures) {
     Write-Warning "Backup completed with errors:"
     $failures | ForEach-Object { Write-Warning " - $_" }
+    WriteEvent -EntryType "Warning" -EventId 2 -Message "Backup completed with errors:`n$($failures -join "`n")`n`nArchive: $ArchivePath`nLog: $LogPath"
 }
 else {
     Write-Host "Backup completed successfully."
+    WriteEvent -EntryType "Information" -EventId 1 -Message "Backup completed successfully.`n`nArchive: $ArchivePath`nLog: $LogPath"
 }
 Write-Host "Saved file to: $ArchivePath"
 if ($copiedTo) {
