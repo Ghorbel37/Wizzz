@@ -61,7 +61,8 @@
     Time the scheduled task runs (default: 23:12).
 
 .PARAMETER InstallPath
-    Folder where Wizzz is installed with the scheduled task (default: C:\Program Files\Wizzz).
+    Folder where Wizzz is installed with the scheduled task. By default, the WizTree folder
+    (C:\Program Files\WizTree) when WizTree is installed, otherwise C:\Program Files\Wizzz.
 
 .PARAMETER ConfigPath
     Configuration file (default: Wizzz.config.json next to this script).
@@ -98,7 +99,7 @@ param(
     [switch]$UninstallTask,
     [string]$TaskDay,
     [string]$TaskTime,
-    [string]$InstallPath = (Join-Path $env:ProgramFiles "Wizzz"),
+    [string]$InstallPath,
     [string]$ConfigPath = (Join-Path $PSScriptRoot "Wizzz.config.json"),
     [switch]$Configure
 )
@@ -112,6 +113,13 @@ $TaskName = "Wiztree Filesystem Backup"
 
 # Files of an installation (-InstallPath), only these are removed when uninstalling
 $InstalledFiles = "Wizzz_backup.ps1", "Wizzz.config.default.json", "Wizzz.config.json"
+
+# Default installation folders: the WizTree folder when WizTree is installed, otherwise a Wizzz folder.
+# They are in Program Files, which only administrators can change: the scheduled task runs the installed
+# script as administrator, so a portable WizTree in a user folder is not used.
+$WizTreeInstallFolders = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ } |
+    ForEach-Object { Join-Path $_ "WizTree" } | Select-Object -Unique
+$WizzzInstallFolder = Join-Path $env:ProgramFiles "Wizzz"
 
 # Folders excluded from the export: they contain too many files that are not useful in a backup
 # Uses the WizTree filter syntax: * is a wildcard and folders end with a backslash.
@@ -562,6 +570,31 @@ function Edit-Configuration($Settings) {
 
 #region Installation and scheduled task
 
+# Get the default installation folder: the WizTree folder when WizTree is installed,
+# so the installed copy finds WizTree next to it, otherwise the Wizzz folder
+function Get-DefaultInstallPath {
+    foreach ($folder in $WizTreeInstallFolders) {
+        if ("WizTree.exe", "WizTree64.exe" | Where-Object { Test-Path (Join-Path $folder $_) -PathType Leaf }) {
+            return $folder
+        }
+    }
+    return $WizzzInstallFolder
+}
+
+# Remove the installed Wizzz files from a folder, then the folder if nothing else is in it
+function Uninstall-Wizzz([string]$Folder) {
+    $InstalledFiles | ForEach-Object { Join-Path $Folder $_ } | Where-Object { Test-Path $_ -PathType Leaf } | Remove-Item -Force
+    if (-not (Get-ChildItem -Path $Folder -Force)) {
+        Remove-Item -Path $Folder -Force
+    }
+    Write-Host "Wizzz removed from $Folder"
+}
+
+# Check if a folder contains an installation of Wizzz
+function Test-WizzzInstalled([string]$Folder) {
+    Test-Path (Join-Path $Folder "Wizzz_backup.ps1") -PathType Leaf
+}
+
 # Check if this script is the installed copy
 function Test-InstalledCopy {
     $PSScriptRoot.TrimEnd("\") -eq $InstallPath.TrimEnd("\")
@@ -603,6 +636,13 @@ function Install-Wizzz([string]$WizTreePath) {
         return $false
     }
     Write-Host "Wizzz installed in $InstallPath"
+
+    # Remove a previous installation in another default folder, e.g. before WizTree was installed
+    foreach ($folder in @($WizTreeInstallFolders) + $WizzzInstallFolder) {
+        if ($folder.TrimEnd("\") -ne $InstallPath.TrimEnd("\") -and (Test-WizzzInstalled $folder)) {
+            Uninstall-Wizzz $folder
+        }
+    }
     return $true
 }
 
@@ -640,9 +680,9 @@ function Install-BackupTask([string]$Day, [string]$Time, [string]$Root, [string]
     return $true
 }
 
-# Remove the scheduled task, then the installed copy after confirmation unless running silently
-# Only the installed files are removed, the backups and the logs are kept.
-function Uninstall-BackupTask {
+# Remove the scheduled task, then the installed copies in the given folders, after confirmation unless running silently
+# Only the installed files are removed, the backups, the logs and the WizTree files are kept.
+function Uninstall-BackupTask([string[]]$Folders) {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
         Write-Host "Scheduled task '$TaskName' removed."
@@ -651,17 +691,10 @@ function Uninstall-BackupTask {
         Write-Host "Scheduled task '$TaskName' does not exist."
     }
 
-    $files = $InstalledFiles | ForEach-Object { Join-Path $InstallPath $_ } | Where-Object { Test-Path $_ -PathType Leaf }
-    if (-not $files) {
-        return
-    }
-    if ($Silent -or (Confirm-Choice "Remove Wizzz from $($InstallPath)? The backups and logs are kept.")) {
-        $files | Remove-Item -Force
-        # Remove the folder only if nothing else is in it
-        if (-not (Get-ChildItem -Path $InstallPath -Force)) {
-            Remove-Item -Path $InstallPath -Force
+    foreach ($folder in $Folders | Where-Object { Test-WizzzInstalled $_ }) {
+        if ($Silent -or (Confirm-Choice "Remove Wizzz from $($folder)? The backups and logs are kept.")) {
+            Uninstall-Wizzz $folder
         }
-        Write-Host "Wizzz removed from $InstallPath"
     }
 }
 
@@ -1019,9 +1052,12 @@ $ConfigPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromP
 if ($PSBoundParameters.ContainsKey("ConfigPath")) {
     $PSBoundParameters["ConfigPath"] = $ConfigPath
 }
-$InstallPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallPath)
-if ($PSBoundParameters.ContainsKey("InstallPath")) {
+if ($InstallPath) {
+    $InstallPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallPath)
     $PSBoundParameters["InstallPath"] = $InstallPath
+}
+else {
+    $InstallPath = Get-DefaultInstallPath
 }
 
 if (-not (Test-Administrator)) {
@@ -1058,7 +1094,9 @@ if ($InstallTask -and $UninstallTask) {
     Exit-Script 1
 }
 if ($UninstallTask) {
-    Uninstall-BackupTask
+    # Without -InstallPath, look for Wizzz in all the default installation folders
+    $installFolders = if ($PSBoundParameters.ContainsKey("InstallPath")) { @($InstallPath) } else { @($WizTreeInstallFolders) + $WizzzInstallFolder }
+    Uninstall-BackupTask -Folders $installFolders
     Exit-Script
 }
 if ($InstallTask) {
