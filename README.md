@@ -1,8 +1,7 @@
 <p align="center">
-  <img src="assets/icon.svg" alt="Wizzz icon" width="128" height="128" />
+  <img src="assets/banner.png" alt="Wizzz: back up your filesystem tree like a wizzz" />
 </p>
-<h1 align="center">Welcome to Wizzz 👋</h1>
-<p>
+<p align="center">
   <a href="LICENSE">
     <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg" />
   </a>
