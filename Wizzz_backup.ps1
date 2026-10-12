@@ -16,6 +16,9 @@
     (event ID 1 = success, 2 = completed with errors, 3 = failed).
     The script exits with code 1 when something failed.
 
+    When the script is run by hand and Wizzz is not installed, it offers to install it
+    with the scheduled task at the end of a successful backup.
+
     Lists can be given as several values or as a single comma separated value,
     e.g. -SkipScan "E:","F:" or -SkipScan "E:,F:".
 
@@ -680,6 +683,24 @@ function Install-BackupTask([string]$Day, [string]$Time, [string]$Root, [string]
     return $true
 }
 
+# Get the options given on the command line that the scheduled task uses, without the task options
+function Get-TaskArgument($Parameters) {
+    Get-ForwardedArgument $Parameters -Exclude "InstallTask", "UninstallTask", "TaskDay", "TaskTime", "Silent", "ConfigPath", "Configure", "InstallPath"
+}
+
+# After a successful backup started by hand, offer to install Wizzz when the scheduled task is not installed
+# Never asked in silent mode, so the scheduled task and scripted runs are not affected.
+function Request-Installation($Parameters) {
+    if ($Silent -or (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
+        return
+    }
+    Write-Host "Wizzz is not installed: backups are only made when you run this script."
+    if (Confirm-Choice "Install Wizzz in $InstallPath and back up automatically every $TaskDay at $($TaskTime)?") {
+        $null = Install-BackupTask -Day $TaskDay -Time $TaskTime -Root $BackupRoot -WizTreePath $Settings.WizTreePath -ExtraArguments "$(Get-TaskArgument $Parameters)"
+    }
+    Write-Host ""
+}
+
 # Remove the scheduled task, then the installed copies in the given folders, after confirmation unless running silently
 # Only the installed files are removed, the backups, the logs and the WizTree files are kept.
 function Uninstall-BackupTask([string[]]$Folders) {
@@ -1101,8 +1122,7 @@ if ($UninstallTask) {
 }
 if ($InstallTask) {
     # Pass the options given on the command line, except the task options
-    $taskArguments = Get-ForwardedArgument $PSBoundParameters -Exclude "InstallTask", "UninstallTask", "TaskDay", "TaskTime", "Silent", "ConfigPath", "Configure", "InstallPath"
-    Exit-Script ([int](-not (Install-BackupTask -Day $TaskDay -Time $TaskTime -Root $BackupRoot -WizTreePath $Settings.WizTreePath -ExtraArguments "$taskArguments")))
+    Exit-Script ([int](-not (Install-BackupTask -Day $TaskDay -Time $TaskTime -Root $BackupRoot -WizTreePath $Settings.WizTreePath -ExtraArguments "$(Get-TaskArgument $PSBoundParameters)")))
 }
 
 # Each backup gets its own folder for the exported CSV files, and its own log
@@ -1180,6 +1200,9 @@ $summary = [pscustomobject]@{
     CopyResult          = $copyResult
 }
 Write-BackupResult -Summary $summary -Failures $failures
+if (-not $failures) {
+    Request-Installation $PSBoundParameters
+}
 Exit-Script ([int][bool]$failures)
 
 #endregion

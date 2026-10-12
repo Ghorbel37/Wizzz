@@ -29,6 +29,9 @@ or to `C:\Program Files\Wizzz` when WizTree is not installed there,
 and creates a scheduled task that runs this copy every Sunday at 23:12,
 so the folder you downloaded Wizzz to can be deleted.
 Only folders in Program Files are used by default, as the task runs the script as administrator.
+
+When you run the script by hand (right-click > Run with PowerShell) and Wizzz is not installed,
+it offers to install it at the end of a successful backup.
 If the computer is off at that time, the backup runs as soon as possible afterwards.
 The task runs whether you are logged on or not.
 
