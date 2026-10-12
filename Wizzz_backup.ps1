@@ -836,19 +836,35 @@ function Get-ExclusionFilter([string[]]$Patterns) {
     "`"$($quoted -join "|")`""
 }
 
-# Export the filesystem tree of a drive to a CSV file with WizTree, returns $true on success
+# Count the files and folders in a WizTree CSV file: one per line, after the 2 header lines
+function Measure-CsvEntry([string]$Path) {
+    $lines = 0
+    foreach ($line in [System.IO.File]::ReadLines($Path)) { $lines++ }
+    [math]::Max(0, $lines - 2)
+}
+
+# Export the filesystem tree of a drive to a CSV file with WizTree
+# Returns the drive, the CSV size, its number of entries and the export duration, or $null if it failed
 function Export-Drive($Drive, [string]$WizTreeExePath, [string]$Destination, [string[]]$Exclusions) {
     $driveName = $Drive.DeviceID
     $csvName = $driveName[0] + "_%d_%t.csv"
     Write-Host "Saving backup for $driveName"
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $wizTree = Start-Process -FilePath $WizTreeExePath -ArgumentList "$driveName /export=""$Destination\$csvName"" /admin=1 /filterexclude=$(Get-ExclusionFilter $Exclusions)" -Wait -PassThru
+    $stopwatch.Stop()
 
     # Make sure WizTree exported a CSV for this drive
-    if (-not (Get-ChildItem -Path $Destination -Filter ($driveName[0] + "_*.csv") -ErrorAction SilentlyContinue)) {
+    $csv = Get-ChildItem -Path $Destination -Filter ($driveName[0] + "_*.csv") -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $csv) {
         Write-Warning "WizTree failed to export $driveName (exit code $($wizTree.ExitCode))"
-        return $false
+        return $null
     }
-    return $true
+    [pscustomobject]@{
+        Drive    = $driveName
+        Size     = $csv.Length
+        Entries  = Measure-CsvEntry $csv.FullName
+        Duration = $stopwatch.Elapsed
+    }
 }
 
 # Compress the exported CSV files into an archive, returns the archive path, or $null if it failed
@@ -941,23 +957,53 @@ function Clear-ExportFolder([string]$Path) {
     }
 }
 
-# Show the result of the backup and write it to the event log
-function Write-BackupResult([string]$ArchivePath, $CopyResult, [string[]]$Failures) {
+# Format a size in bytes for display, e.g. "128.4 MB"
+function Format-Size([double]$Bytes) {
+    if ($Bytes -ge 1GB) { "{0:N1} GB" -f ($Bytes / 1GB) }
+    elseif ($Bytes -ge 1MB) { "{0:N1} MB" -f ($Bytes / 1MB) }
+    else { "{0:N0} KB" -f ($Bytes / 1KB) }
+}
+
+# Format a duration for display, e.g. "1 min 05 s"
+function Format-Duration([timespan]$Duration) {
+    if ($Duration.TotalHours -ge 1) { "{0} h {1:00} min" -f [int][math]::Floor($Duration.TotalHours), $Duration.Minutes }
+    elseif ($Duration.TotalMinutes -ge 1) { "{0} min {1:00} s" -f $Duration.Minutes, $Duration.Seconds }
+    else { "{0} s" -f [int][math]::Ceiling($Duration.TotalSeconds) }
+}
+
+# Show the summary and the result of the backup, and write the result to the event log
+# $Summary contains the start time, the exports, the archive, the compression and the copy result.
+function Write-BackupResult($Summary, [string[]]$Failures) {
+    $totalCsvSize = ($Summary.Exports | Measure-Object -Property Size -Sum).Sum
+    $archiveSize = (Get-Item $Summary.ArchivePath).Length
+    $ratio = if ($archiveSize) { $totalCsvSize / $archiveSize } else { 0 }
+    $duration = Format-Duration ((Get-Date) - $Summary.StartTime)
+
+    Write-Host "Summary" -ForegroundColor Cyan
+    Write-Host "  Duration         $duration"
+    foreach ($export in $Summary.Exports) {
+        Write-Host ("  Drive {0}         {1:N0} files and folders, {2} CSV, {3}" -f $export.Drive, $export.Entries, (Format-Size $export.Size), (Format-Duration $export.Duration))
+    }
+    Write-Host "  Total CSV        $(Format-Size $totalCsvSize)"
+    Write-Host ("  Archive          {0}, {1} ({2}, {3:N0} times smaller, {4})" -f $Summary.ArchivePath, (Format-Size $archiveSize), $Summary.Compression, $ratio, (Format-Duration $Summary.CompressionDuration))
+    Write-Host "  Copied to        $(Format-ItemList $Summary.CopyResult.CopiedTo)"
+    if ($Summary.CopyResult.NotConnected) {
+        Write-Host "  Not connected    $(Format-ItemList $Summary.CopyResult.NotConnected)"
+    }
+    Write-Host "  Problems         $(if ($Failures) { $Failures.Count } else { 'none' })"
+    Write-Host ""
+
+    # One line for the event log
+    $drivesLine = ($Summary.Exports | ForEach-Object { "{0} {1:N0} entries" -f $_.Drive, $_.Entries }) -join ", "
+    $totals = "$drivesLine. CSV $(Format-Size $totalCsvSize), archive $(Format-Size $archiveSize) ($($Summary.Compression)), $duration."
     if ($Failures) {
         Write-Warning "Backup completed with errors:"
         $Failures | ForEach-Object { Write-Warning " - $_" }
-        Write-BackupEvent -EntryType "Warning" -EventId 2 -Message "Backup completed with errors:`n$($Failures -join "`n")`n`nArchive: $ArchivePath`nLog: $LogPath"
+        Write-BackupEvent -EntryType "Warning" -EventId 2 -Message "Backup completed with errors:`n$($Failures -join "`n")`n`n$totals`nArchive: $($Summary.ArchivePath)`nLog: $LogPath"
     }
     else {
         Write-Host "Backup completed successfully."
-        Write-BackupEvent -EntryType "Information" -EventId 1 -Message "Backup completed successfully.`n`nArchive: $ArchivePath`nLog: $LogPath"
-    }
-    Write-Host "Saved file to: $ArchivePath"
-    if ($CopyResult.CopiedTo) {
-        Write-Host "Copied to: $($CopyResult.CopiedTo -join ', ')"
-    }
-    if ($CopyResult.NotConnected) {
-        Write-Host "Not copied, drive not connected: $($CopyResult.NotConnected -join ', ')"
+        Write-BackupEvent -EntryType "Information" -EventId 1 -Message "Backup completed successfully.`n`n$totals`nArchive: $($Summary.ArchivePath)`nLog: $LogPath"
     }
     Write-Host ""
 }
@@ -1022,6 +1068,7 @@ if ($InstallTask) {
 }
 
 # Each backup gets its own folder for the exported CSV files, and its own log
+$StartTime = Get-Date
 $BackupName = Get-Date -Format "yyyyMMdd_HHmmss"
 $ExportFolder = Join-Path $BackupRoot $BackupName
 $LogFolder = Join-Path $BackupRoot "Logs"
@@ -1058,8 +1105,13 @@ Write-Host "Done.`n"
 
 # Export each drive, the failures are reported at the end
 $failures = @()
+$exports = @()
 foreach ($drive in $scanDrives) {
-    if (-not (Export-Drive -Drive $drive -WizTreeExePath $WizTreeExePath -Destination $ExportFolder -Exclusions $Exclusions)) {
+    $export = Export-Drive -Drive $drive -WizTreeExePath $WizTreeExePath -Destination $ExportFolder -Exclusions $Exclusions
+    if ($export) {
+        $exports += $export
+    }
+    else {
         $failures += "Export of $($drive.DeviceID)"
     }
 }
@@ -1068,7 +1120,9 @@ if (-not (Get-ChildItem -Path $ExportFolder -Filter "*.csv")) {
 }
 Write-Host "Backup complete`n"
 
+$compressionStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $archivePath = Compress-Backup -Source $ExportFolder -ArchiveBasePath (Join-Path $BackupRoot "Backup_$BackupName") -SevenZipPath $SevenZipPath
+$compressionStopwatch.Stop()
 if (-not $archivePath) {
     Exit-BackupWithError "Compression failed. The exported CSV files were kept in $ExportFolder"
 }
@@ -1079,7 +1133,15 @@ $failures += $copyResult.Failures
 
 Clear-ExportFolder $ExportFolder
 
-Write-BackupResult -ArchivePath $archivePath -CopyResult $copyResult -Failures $failures
+$summary = [pscustomobject]@{
+    StartTime           = $StartTime
+    Exports             = $exports
+    ArchivePath         = $archivePath
+    Compression         = if ($SevenZipPath) { "7-Zip PPMd" } else { "built-in Zip" }
+    CompressionDuration = $compressionStopwatch.Elapsed
+    CopyResult          = $copyResult
+}
+Write-BackupResult -Summary $summary -Failures $failures
 Exit-Script ([int][bool]$failures)
 
 #endregion
