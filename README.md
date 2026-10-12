@@ -22,8 +22,11 @@ The script finds WizTree in its own folder or in the WizTree installation folder
 Use `-WizTreePath` if WizTree is installed somewhere else.
 
 ## Install
-Run `.\Wizzz_backup.ps1 -Configure` and save to set up the settings and the scheduled task,
-or install the task directly. This will create a scheduled task that runs the backup every Sunday at 23:12.
+Run `.\Wizzz_backup.ps1 -Configure` and save to set up the settings and install Wizzz,
+or install it directly with `-InstallTask`.
+This copies the script and its configuration to `C:\Program Files\Wizzz`
+and creates a scheduled task that runs this copy every Sunday at 23:12,
+so the folder you downloaded Wizzz to can be deleted.
 If the computer is off at that time, the backup runs as soon as possible afterwards.
 The task runs whether you are logged on or not.
 
@@ -40,10 +43,18 @@ The task uses the [configuration](#configuration) and the other [options](#usage
 
 | Option | Description |
 | --- | --- |
-| `-InstallTask` | Register the scheduled task, then exit. Running it again replaces the task. |
-| `-UninstallTask` | Remove the scheduled task, then exit |
+| `-InstallTask` | Install Wizzz and register the scheduled task, then exit. Running it again updates the installed copy and the task. |
+| `-UninstallTask` | Remove the scheduled task and the installed copy, then exit. The backups and logs are kept. |
+| `-InstallPath <path>` | Folder where Wizzz is installed (default: `C:\Program Files\Wizzz`) |
 | `-TaskDay <day>` | Day of the week the task runs (default: `Sunday`) |
 | `-TaskTime <time>` | Time the task runs (default: `23:12`) |
+
+To change the settings later, run `-Configure` from the installed copy,
+or from the downloaded folder: saving then offers to update the installed copy.
+
+```powershell
+& "C:\Program Files\Wizzz\Wizzz_backup.ps1" -Configure
+```
 
 ## Uninstall
 

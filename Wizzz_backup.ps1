@@ -47,18 +47,21 @@
     They are added to the automatic copies (use -NoCopy to only copy to them).
 
 .PARAMETER InstallTask
-    Register a scheduled task that runs the backup with the configuration file
-    and the other options given on the command line, then exit.
-    Running it again replaces the task.
+    Install Wizzz in the -InstallPath folder and register a scheduled task that runs the installed copy
+    with its configuration file and the other options given on the command line, then exit.
+    Running it again updates the installed copy and replaces the task.
 
 .PARAMETER UninstallTask
-    Remove the scheduled task, then exit.
+    Remove the scheduled task and the installed copy, then exit. The backups and logs are kept.
 
 .PARAMETER TaskDay
     Day of the week the scheduled task runs (default: Sunday).
 
 .PARAMETER TaskTime
     Time the scheduled task runs (default: 23:12).
+
+.PARAMETER InstallPath
+    Folder where Wizzz is installed with the scheduled task (default: C:\Program Files\Wizzz).
 
 .PARAMETER ConfigPath
     Configuration file (default: Wizzz.config.json next to this script).
@@ -95,6 +98,7 @@ param(
     [switch]$UninstallTask,
     [string]$TaskDay,
     [string]$TaskTime,
+    [string]$InstallPath = (Join-Path $env:ProgramFiles "Wizzz"),
     [string]$ConfigPath = (Join-Path $PSScriptRoot "Wizzz.config.json"),
     [switch]$Configure
 )
@@ -105,6 +109,9 @@ param(
 $MinFreeSpace = 1GB
 
 $TaskName = "Wiztree Filesystem Backup"
+
+# Files of an installation (-InstallPath), only these are removed when uninstalling
+$InstalledFiles = "Wizzz_backup.ps1", "Wizzz.config.default.json", "Wizzz.config.json"
 
 # Folders excluded from the export: they contain too many files that are not useful in a backup
 # Uses the WizTree filter syntax: * is a wildcard and folders end with a backslash.
@@ -494,21 +501,23 @@ function Get-WizTreePathDisplay([string]$Path) {
     if ($Path) { $Path } else { "(automatic)" }
 }
 
-# Install the scheduled task after saving, or update it when the schedule changed, returns $true on success
+# Install Wizzz and the scheduled task after saving, returns $true on success
+# When they are already installed, they are updated if the schedule changed,
+# or if this is not the installed copy, so the installed configuration gets the changes.
 function Confirm-BackupTask($Edited, $Settings) {
     $taskExists = [bool](Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)
     $scheduleChanged = $Edited.TaskDay -ne $Settings.TaskDay -or $Edited.TaskTime -ne $Settings.TaskTime
     if (-not $taskExists) {
-        $question = "Install the scheduled task to run the backup every $($Edited.TaskDay) at $($Edited.TaskTime)?"
+        $question = "Install Wizzz in $InstallPath and schedule the backup every $($Edited.TaskDay) at $($Edited.TaskTime)?"
     }
-    elseif ($scheduleChanged) {
-        $question = "Update the scheduled task to run every $($Edited.TaskDay) at $($Edited.TaskTime)?"
+    elseif ($scheduleChanged -or -not (Test-InstalledCopy)) {
+        $question = "Update Wizzz in $InstallPath and the scheduled task to run every $($Edited.TaskDay) at $($Edited.TaskTime)?"
     }
     else {
         return $true
     }
     if (Confirm-Choice $question) {
-        return (Install-BackupTask -Day $Edited.TaskDay -Time $Edited.TaskTime -Root $Edited.BackupRoot)
+        return (Install-BackupTask -Day $Edited.TaskDay -Time $Edited.TaskTime -Root $Edited.BackupRoot -WizTreePath $Edited.WizTreePath)
     }
     return $true
 }
@@ -551,13 +560,62 @@ function Edit-Configuration($Settings) {
 
 #endregion
 
-#region Scheduled task
+#region Installation and scheduled task
 
-# Register the scheduled task, returns $true on success
-# The task runs this script silently with the configuration file and the given extra arguments.
+# Check if this script is the installed copy
+function Test-InstalledCopy {
+    $PSScriptRoot.TrimEnd("\") -eq $InstallPath.TrimEnd("\")
+}
+
+# Copy this script and its configuration to the installation folder, returns $true on success
+# The scheduled task runs the installed copy, so the backup does not depend on the folder the script was downloaded to.
+function Install-Wizzz([string]$WizTreePath) {
+    if (Test-InstalledCopy) {
+        return $true
+    }
+    $installedConfig = Join-Path $InstallPath "Wizzz.config.json"
+    try {
+        $null = New-Item -ItemType Directory -Path $InstallPath -Force -ErrorAction Stop
+        Copy-Item -Path $PSCommandPath -Destination (Join-Path $InstallPath "Wizzz_backup.ps1") -Force -ErrorAction Stop
+        if (Test-Path $DefaultConfigPath -PathType Leaf) {
+            Copy-Item -Path $DefaultConfigPath -Destination (Join-Path $InstallPath "Wizzz.config.default.json") -Force -ErrorAction Stop
+        }
+        # The installed configuration is the same as this one, without configuration file it uses the defaults
+        if (Test-Path $ConfigPath -PathType Leaf) {
+            Copy-Item -Path $ConfigPath -Destination $installedConfig -Force -ErrorAction Stop
+        }
+        elseif (Test-Path $installedConfig -PathType Leaf) {
+            Remove-Item -Path $installedConfig -Force -ErrorAction Stop
+        }
+
+        # WizTree next to this script is not next to the installed copy, save its path in the installed configuration
+        $wizTreeHere = "WizTree.exe", "WizTree64.exe" | ForEach-Object { Join-Path $PSScriptRoot $_ } |
+            Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -First 1
+        if (-not $WizTreePath -and $wizTreeHere) {
+            $config = Read-ConfigFile $installedConfig
+            $config.WizTreePath = $wizTreeHere
+            ConvertTo-Json -InputObject $config -Depth 3 | Set-Content -Path $installedConfig -Encoding UTF8 -ErrorAction Stop
+            Write-Host "WizTree path saved in the installed configuration: $wizTreeHere"
+        }
+    }
+    catch {
+        Write-Error "Failed to install Wizzz in $($InstallPath): $_"
+        return $false
+    }
+    Write-Host "Wizzz installed in $InstallPath"
+    return $true
+}
+
+# Install Wizzz and register the scheduled task, returns $true on success
+# The task runs the installed copy silently with its configuration file and the given extra arguments.
 # The configuration file is read on each run, so it can be changed later without reinstalling the task.
-function Install-BackupTask([string]$Day, [string]$Time, [string]$Root, [string]$ExtraArguments) {
-    $taskCommand = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Silent -ConfigPath `"$ConfigPath`" $ExtraArguments".TrimEnd()
+function Install-BackupTask([string]$Day, [string]$Time, [string]$Root, [string]$WizTreePath, [string]$ExtraArguments) {
+    if (-not (Install-Wizzz -WizTreePath $WizTreePath)) {
+        return $false
+    }
+    $installedScript = Join-Path $InstallPath "Wizzz_backup.ps1"
+    $installedConfig = Join-Path $InstallPath "Wizzz.config.json"
+    $taskCommand = "-NoProfile -ExecutionPolicy Bypass -File `"$installedScript`" -Silent -ConfigPath `"$installedConfig`" $ExtraArguments".TrimEnd()
     try {
         $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $taskCommand
         $trigger = New-ScheduledTaskTrigger -Weekly -At $Time -DaysOfWeek $Day -ErrorAction Stop
@@ -582,6 +640,8 @@ function Install-BackupTask([string]$Day, [string]$Time, [string]$Root, [string]
     return $true
 }
 
+# Remove the scheduled task, then the installed copy after confirmation unless running silently
+# Only the installed files are removed, the backups and the logs are kept.
 function Uninstall-BackupTask {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
@@ -589,6 +649,19 @@ function Uninstall-BackupTask {
     }
     else {
         Write-Host "Scheduled task '$TaskName' does not exist."
+    }
+
+    $files = $InstalledFiles | ForEach-Object { Join-Path $InstallPath $_ } | Where-Object { Test-Path $_ -PathType Leaf }
+    if (-not $files) {
+        return
+    }
+    if ($Silent -or (Confirm-Choice "Remove Wizzz from $($InstallPath)? The backups and logs are kept.")) {
+        $files | Remove-Item -Force
+        # Remove the folder only if nothing else is in it
+        if (-not (Get-ChildItem -Path $InstallPath -Force)) {
+            Remove-Item -Path $InstallPath -Force
+        }
+        Write-Host "Wizzz removed from $InstallPath"
     }
 }
 
@@ -900,6 +973,10 @@ $ConfigPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromP
 if ($PSBoundParameters.ContainsKey("ConfigPath")) {
     $PSBoundParameters["ConfigPath"] = $ConfigPath
 }
+$InstallPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallPath)
+if ($PSBoundParameters.ContainsKey("InstallPath")) {
+    $PSBoundParameters["InstallPath"] = $InstallPath
+}
 
 if (-not (Test-Administrator)) {
     Invoke-AsAdministrator $PSBoundParameters
@@ -940,8 +1017,8 @@ if ($UninstallTask) {
 }
 if ($InstallTask) {
     # Pass the options given on the command line, except the task options
-    $taskArguments = Get-ForwardedArgument $PSBoundParameters -Exclude "InstallTask", "UninstallTask", "TaskDay", "TaskTime", "Silent", "ConfigPath", "Configure"
-    Exit-Script ([int](-not (Install-BackupTask -Day $TaskDay -Time $TaskTime -Root $BackupRoot -ExtraArguments "$taskArguments")))
+    $taskArguments = Get-ForwardedArgument $PSBoundParameters -Exclude "InstallTask", "UninstallTask", "TaskDay", "TaskTime", "Silent", "ConfigPath", "Configure", "InstallPath"
+    Exit-Script ([int](-not (Install-BackupTask -Day $TaskDay -Time $TaskTime -Root $BackupRoot -WizTreePath $Settings.WizTreePath -ExtraArguments "$taskArguments")))
 }
 
 # Each backup gets its own folder for the exported CSV files, and its own log
