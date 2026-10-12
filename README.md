@@ -15,9 +15,7 @@
 ## Requirements
 * Windows with PowerShell 5.1 or PowerShell 7
 * [WizTree](https://diskanalyzer.com/download) installed
-* [7-Zip](https://www.7-zip.org/) (optional). It is used when installed, giving archives about half the size
-  of the built-in Zip (PPMd compression, which works best on the CSV text).
-  Otherwise the built-in Zip compression is used and the script recommends installing 7-Zip.
+* [7-Zip](https://www.7-zip.org/) (optional but recommended). Used when installed, archives are about half the size of a Zip.
 * Administrator privileges. The script restarts itself as administrator if needed.
 
 The script finds WizTree in its own folder or in the WizTree installation folder.
