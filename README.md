@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="assets/icon.svg" alt="Wizzz icon" width="128" height="128" />
+</p>
 <h1 align="center">Welcome to Wizzz 👋</h1>
 <p>
   <a href="LICENSE">
